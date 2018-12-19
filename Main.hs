@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 import LC
 import Parser
 import Data.Char
@@ -30,40 +31,40 @@ test = do
   parseTest term "(λ λ 1 (1 (1 0))) 2 0"
 
 type Parser = Parsec Void String
-data Command
-  = Query Term
-  | Binding String Term
-  | Use [String]
+data Command = Query Term | Binding String Term | Use [String]
 
 userInput :: Parser Command
 userInput = try directive <|> try definition <|> Query <$> term where
-  directive = do
-    symbol ":"
-    s <- word
-    case s of
-      "use" -> Use <$> some word
-      _ -> fail $ "Unknown command '" ++ s ++ "'"
+  directive = symbol ":" *> word >>= \case
+    "use" -> Use <$> some word
+    s -> fail $ "Unknown command '" ++ s ++ "'"
   definition = Binding <$> word <* lexeme (string "=") <*> term
 
--- TODO keep track of which files have been loaded
-type Env = StateT (Map String Term) IO
+data StateType = StateType
+  { bindings :: Map String Term
+  , imports :: [String]
+  }
+type Env = StateT StateType IO
 
 runLine :: String -> Env ()
 runLine "" = return ()
 runLine s =
   case runParser userInput "" s of
     Left e -> lift . putStrLn $ errorBundlePretty e
-    Right (Query e) -> get >>= lift . print . evaluate . flip fill e
+    Right (Query e) -> do
+      m <- bindings <$> get
+      lift . print . evaluate $ fill m e
     Right (Binding s e) -> do
-      m <- get
-      modify $ insert s (fill m e)
-    Right (Use files) -> forM_ files $ \ f -> do
-      lift (readFile f) >>= mapM_ runLine . lines
+      m <- bindings <$> get
+      modify (\ st -> st { bindings = insert s (fill m e) m })
+    Right (Use files) -> do
+      forM_ files $ (mapM_ runLine . lines =<<) . lift . readFile
+      modify (\ st -> st { imports = imports st ++ files })
 
 repl :: Env ()
-repl = do
-  s <- lift $ prompt "> "
+repl = forever $ do
+  loaded <- imports <$> get
+  s <- lift . prompt $ unwords loaded ++ "> "
   runLine s
-  repl
 
-main = runStateT repl empty
+main = runStateT repl (StateType empty [])
