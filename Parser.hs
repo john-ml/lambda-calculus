@@ -1,5 +1,9 @@
 module Parser
-  ( lit
+  ( lexeme
+  , symbol
+  , lit
+  , word
+  , hole
   , apps
   , lambda
   , term
@@ -32,9 +36,12 @@ parens = (between `on` symbol) "(" ")"
 lit :: Parser Term
 lit = Lit . read <$> lexeme (some digitChar) <?> "literal"
 
-hole :: Parser Term
-hole = Hole <$> lexeme (some (satisfy p)) <?> "hole" where
+word :: Parser String
+word = lexeme . some $ satisfy p where
   p c = not (isSpace c) && not (c `elem` "()")
+
+hole :: Parser Term
+hole = Hole <$> word <?> "hole" where
 
 simpleTerm :: Parser Term
 simpleTerm = lambda <|> lit <|> hole <|> parens term
