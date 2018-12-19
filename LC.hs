@@ -2,9 +2,9 @@
 
 module LC
   ( Term (..)
-  , forExpr
-  , forLits
-  , forHoles
+  , mapExpr
+  , mapLits
+  , mapHoles
   , substitute
   , fill
   , reduce
@@ -29,34 +29,34 @@ instance Show Term where
   show (Λ e) = "λ " ++ show e ++ ""
   show (Hole s) = s
 
-forExpr
+mapExpr
   :: (Integer -> Integer -> Term)
   -> (Integer -> String -> Term)
   -> Term
   -> Term
-forExpr f g = go 0 where
+mapExpr f g = go 0 where
   go n (Lit a) = f n a
   go n (Hole s) = g n s
   go n (f' :$ e) = go n f' :$ go n e
   go n (Λ e) = Λ (go (n + 1) e)
 
-forLits :: (Integer -> Integer -> Term) -> Term -> Term
-forLits f = forExpr f (const Hole)
+mapLits :: (Integer -> Integer -> Term) -> Term -> Term
+mapLits f = mapExpr f (const Hole)
 
-forHoles :: (Integer -> String -> Term) -> Term -> Term
-forHoles g = forExpr (const Lit) g
+mapHoles :: (Integer -> String -> Term) -> Term -> Term
+mapHoles g = mapExpr (const Lit) g
 
 adjustFree :: (Integer -> Integer) -> Term -> Term
-adjustFree f = forLits (\ n a -> if a >= n then Lit (f a) else Lit a)
+adjustFree f = mapLits (\ n a -> if a >= n then Lit (f a) else Lit a)
 
 substitute :: Term -> Term -> Term
-substitute e = forLits (\ n a ->
+substitute e = mapLits (\ n a ->
   if | a > n     -> Lit (pred a)
      | a == n    -> adjustFree (+ n) e
      | otherwise -> Lit a)
 
 fill :: Map String Term -> Term -> Term
-fill m = forHoles (\ n s ->
+fill m = mapHoles (\ n s ->
   case m !? s of
     Just e -> adjustFree (+ n) e
     Nothing -> Hole s)
