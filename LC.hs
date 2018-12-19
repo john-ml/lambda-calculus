@@ -1,13 +1,17 @@
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE DeriveFoldable #-}
 
 module LC
   ( Term (..)
   , mapExpr
   , mapLits
   , mapHoles
+  , pretty
   , substitute
   , fill
   , reduce
+  , sizeof
+  , simplify
   , evaluate
   ) where
 
@@ -24,7 +28,9 @@ infixl 6 :$
 instance Show Term where
   show (Lit a) = show a
   show (f@(Λ _) :$ Lit a) = "(" ++ show f ++ ") " ++ show a
+  show (f@(Λ _) :$ Hole a) = "(" ++ show f ++ ") " ++ a
   show (f :$ Lit a) = show f ++ " " ++ show a
+  show (f :$ Hole a) = show f ++ " " ++ a
   show (f :$ e) = show f ++ " (" ++ show e ++ ")"
   show (Λ e) = "λ " ++ show e ++ ""
   show (Hole s) = s
@@ -45,6 +51,15 @@ mapLits f = mapExpr f (const Hole)
 
 mapHoles :: (Integer -> String -> Term) -> Term -> Term
 mapHoles g = mapExpr (const Lit) g
+
+pretty :: Map String Term -> Term -> String
+pretty m = show . go 0 where
+  m' = fromList $ (\ (x, y) -> (y, x)) <$> toList m
+  go n e =
+    case e of
+      f :$ e' -> maybe (go n f :$ go n e') Hole (m' !? e)
+      Λ e' -> maybe (Λ (go (n + 1) e')) Hole (m' !? e)
+      _ -> e
 
 adjustFree :: (Integer -> Integer) -> Term -> Term
 adjustFree f = mapLits (\ n a -> if a >= n then Lit (f a) else Lit a)
@@ -68,6 +83,17 @@ reduce (Lit n :$ e) = Lit n :$ reduce e
 reduce (f :$ e) = reduce f :$ e
 reduce (Λ e) = Λ (reduce e)
 reduce (Hole s) = Hole s
+
+sizeof :: Integral a => Term -> a
+sizeof (Lit a) = 1
+sizeof (Hole s) = 1
+sizeof (f :$ e) = 1 + sizeof f + sizeof e
+sizeof (Λ e) = 1 + sizeof e
+
+simplify :: Term -> Term
+simplify e =
+  let e' = iterate reduce e !! 100 in
+  if sizeof e' < sizeof e then e' else e
 
 evaluate :: Term -> Term
 evaluate e =

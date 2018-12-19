@@ -55,5 +55,3 @@ hd = λ 0 const id
 tl = λ fst (0 (λ λ pair (snd 0) (cn 1 (snd 0))) (pair nil nil))
 
 len = λ 0 (const succ) zero
-
-

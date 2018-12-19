@@ -53,10 +53,10 @@ runLine s =
     Left e -> lift . putStrLn $ errorBundlePretty e
     Right (Query e) -> do
       m <- bindings <$> get
-      lift . print . evaluate $ fill m e
+      lift . putStrLn . pretty m . evaluate $ fill m e
     Right (Binding s e) -> do
       m <- bindings <$> get
-      modify (\ st -> st { bindings = insert s (fill m e) m })
+      modify (\ st -> st { bindings = insert s (simplify (fill m e)) m })
     Right (Use files) -> do
       forM_ files $ (mapM_ runLine . lines =<<) . lift . readFile
       modify (\ st -> st { imports = imports st ++ files })
