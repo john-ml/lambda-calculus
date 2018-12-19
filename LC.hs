@@ -1,5 +1,4 @@
 {-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE DeriveFoldable #-}
 
 module LC
   ( Term (..)
@@ -55,11 +54,10 @@ mapHoles g = mapExpr (const Lit) g
 pretty :: Map String Term -> Term -> String
 pretty m = show . go 0 where
   m' = fromList $ (\ (x, y) -> (y, x)) <$> toList m
-  go n e =
-    case e of
-      f :$ e' -> maybe (go n f :$ go n e') Hole (m' !? e)
-      Λ e' -> maybe (Λ (go (n + 1) e')) Hole (m' !? e)
-      _ -> e
+  try e handler = maybe handler Hole (m' !? e)
+  go n e@(f :$ e') = try e (go n f :$ go n e')
+  go n e@(Λ e') = try e (Λ (go (n + 1) e'))
+  go _ e = e
 
 adjustFree :: (Integer -> Integer) -> Term -> Term
 adjustFree f = mapLits (\ n a -> if a >= n then Lit (f a) else Lit a)

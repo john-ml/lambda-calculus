@@ -34,6 +34,7 @@ ten   = succ (succ (succ (succ (succ (succ (succ (succ (succ (succ zero)))))))))
 
 add = λ λ λ λ 3 1 (2 1 0)
 mul = λ λ 1 (add 0) zero
+exp = flip app
 
 zero? = λ 0 (const false) true
 
@@ -55,3 +56,7 @@ hd = λ 0 const id
 tl = λ fst (0 (λ λ pair (snd 0) (cn 1 (snd 0))) (pair nil nil))
 
 len = λ 0 (const succ) zero
+app = add
+map = λ λ 0 (λ λ cn (3 1) 0) nil
+range = λ 0 (λ cn zero (map succ 0)) (cn zero nil)
+rev = λ 0 (λ λ app 0 (cn 1 nil)) nil
