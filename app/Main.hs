@@ -11,6 +11,7 @@ import Data.Map
 import Control.Monad.State
 import Data.List (groupBy)
 
+church :: Int -> Term
 church n = Λ (Λ (iterate (Lit 1 :$) (Lit 0) !! n))
 
 prompt :: String -> IO String
@@ -19,6 +20,7 @@ prompt s = do
   hFlush stdout
   getLine
 
+test :: IO ()
 test = do
   print . evaluate $ church 2 :$ church 3
   let ω = Λ (Lit 0 :$ Lit 0)
@@ -60,9 +62,9 @@ runLine s =
     Right (Query e) -> do
       m <- bindings <$> get
       lift . putStrLn . pretty m . evaluate $ fill m e
-    Right (Binding s e) -> do
+    Right (Binding s' e) -> do
       m <- bindings <$> get
-      modify (\ st -> st { bindings = insert s (simplify 100 (fill m e)) m })
+      modify (\ st -> st { bindings = insert s' (simplify 100 (fill m e)) m })
     Right (Use files) -> do
       forM_ files $ (mapM_ runLine . blocks =<<) . lift . readFile
       modify (\ st -> st { imports = imports st ++ files })
@@ -73,4 +75,5 @@ repl = forever $ do
   s <- lift . prompt $ unwords loaded ++ "> "
   runLine s
 
-main = runStateT repl (StateType empty [])
+main :: IO ()
+main = void $ runStateT repl (StateType empty [])

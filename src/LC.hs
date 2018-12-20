@@ -17,7 +17,6 @@ module LC
 
 import Data.Map
 import Data.Function (on)
-import Data.Char
 
 data Term
   = Lit Int
@@ -67,7 +66,7 @@ pretty m = show . go 0 where
 
   unchurch (Λ (Λ e)) = go' e where
     go' (Lit 0) = Just 0
-    go' (Lit 1 :$ e) = (1 +) <$> go' e
+    go' (Lit 1 :$ e') = (1 +) <$> go' e'
     go' _ = Nothing
   unchurch _ = Nothing
 
@@ -85,8 +84,6 @@ fill m = mapHoles (\ n s ->
   case m !? s of
     Just e -> adjustFree (+ n) e
     Nothing -> Hole s)
-
-data Memoized 
 
 reduce :: Term -> Term
 reduce (Lit a) = Lit a
@@ -107,8 +104,8 @@ evaluate :: Term -> Term
 evaluate = whileNot (==) reduce
 
 sizeof :: Integral a => Term -> a
-sizeof (Lit a) = 1
-sizeof (Hole s) = 1
+sizeof (Lit _) = 1
+sizeof (Hole _) = 1
 sizeof (f :$ e) = 1 + sizeof f + sizeof e
 sizeof (Λ e) = 1 + sizeof e
 
