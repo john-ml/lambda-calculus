@@ -72,3 +72,5 @@ zip-with = fix λ λ λ λ
     (cons
       (2 (head 1) (head 0))
       (3 2 (tail 1) (tail 0)))
+
+zip = zip-with pair
