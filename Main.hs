@@ -48,6 +48,7 @@ type Env = StateT StateType IO
 
 runLine :: String -> Env ()
 runLine "" = return ()
+runLine ('#' : _) = return ()
 runLine s =
   case runParser userInput "" s of
     Left e -> lift . putStrLn $ errorBundlePretty e
@@ -56,7 +57,7 @@ runLine s =
       lift . putStrLn . pretty m . evaluate $ fill m e
     Right (Binding s e) -> do
       m <- bindings <$> get
-      modify (\ st -> st { bindings = insert s (simplify (fill m e)) m })
+      modify (\ st -> st { bindings = insert s (simplify 100 (fill m e)) m })
     Right (Use files) -> do
       forM_ files $ (mapM_ runLine . lines =<<) . lift . readFile
       modify (\ st -> st { imports = imports st ++ files })
