@@ -15,8 +15,7 @@ module LC
   , evaluate
   ) where
 
-import Data.Map hiding (foldl')
-import Data.List (foldl')
+import Data.Map
 import Data.Function (on)
 import Data.Char
 
@@ -37,44 +36,6 @@ instance Show Term where
   show (f :$ e) = show f ++ " (" ++ show e ++ ")"
   show (Λ e) = "λ " ++ show e ++ ""
   show (Hole s) = s
-
-data StringMap a = StringMap a [StringMap a] deriving Functor
-
--- partial
-findString (StringMap a _) "" = a
-findString (StringMap _ l) (h : t) = findString (l !! ord h) t
-
--- infinite
-strings :: StringMap String
-strings = StringMap "" $ do
-  c <- chr <$> [0..255]
-  return $ (c :) <$> strings
-
-data TermMap a = TermMap
-  { literalMap :: [a]
-  , holeMap :: StringMap a
-  , appMap :: TermMap (TermMap a)
-  , lamMap :: TermMap a
-  } deriving Functor
-
--- partial
-find :: TermMap a -> Term -> a
-find (TermMap { literalMap = l }) (Lit k) = l !! k
-find (TermMap { holeMap = m }) (Hole s) = findString m s
-find (TermMap { appMap = m }) (f :$ e) = find (find m f) e
-find (TermMap { lamMap = m }) (Λ e) = find m e
-
--- infinite
-terms :: TermMap Term
-terms = TermMap
-  { literalMap = Lit <$> [0..]
-  , holeMap = Hole <$> strings
-  , appMap = (<$> terms) . (:$) <$> terms
-  , lamMap = Λ <$> terms
-  }
-
-memoize :: ((Term -> a) -> Term -> a) -> Term -> a
-memoize f = find (f (memoize f) <$> terms)
 
 mapExpr
   :: (Int -> Int -> Term)
@@ -125,6 +86,8 @@ fill m = mapHoles (\ n s ->
     Just e -> adjustFree (+ n) e
     Nothing -> Hole s)
 
+data Memoized 
+
 reduce :: Term -> Term
 reduce (Lit a) = Lit a
 reduce (Λ e' :$ e) = substitute e e'
@@ -132,16 +95,6 @@ reduce (Lit n :$ e) = Lit n :$ reduce e
 reduce (f :$ e) = reduce f :$ e
 reduce (Λ e) = Λ (reduce e)
 reduce (Hole s) = Hole s
-
---reduce :: Term -> Term
---reduce = memoize reduce' where
---  --ret = id --simplify 20
---  reduce' rec (Lit a) = ret $ Lit a
---  reduce' rec (Λ e' :$ e) = ret $ substitute e e'
---  reduce' rec (Lit n :$ e) = ret $ Lit n :$ rec e
---  reduce' rec (f :$ e) = ret $ rec f :$ e
---  reduce' rec (Λ e) = ret $ Λ (rec e)
---  reduce' rec (Hole s) = ret $ Hole s
 
 simplify :: Int -> Term -> Term
 simplify steps e =

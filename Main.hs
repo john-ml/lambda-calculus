@@ -9,6 +9,7 @@ import Data.Function
 import System.IO
 import Data.Map
 import Control.Monad.State
+import Data.List (groupBy)
 
 church n = Λ (Λ (iterate (Lit 1 :$) (Lit 0) !! n))
 
@@ -46,6 +47,10 @@ data StateType = StateType
   }
 type Env = StateT StateType IO
 
+blocks :: String -> [String]
+blocks = (concat <$>) . groupBy ((<) `on` indent) . lines where
+  indent = length . takeWhile isSpace
+
 runLine :: String -> Env ()
 runLine "" = return ()
 runLine ('#' : _) = return ()
@@ -59,7 +64,7 @@ runLine s =
       m <- bindings <$> get
       modify (\ st -> st { bindings = insert s (simplify 100 (fill m e)) m })
     Right (Use files) -> do
-      forM_ files $ (mapM_ runLine . lines =<<) . lift . readFile
+      forM_ files $ (mapM_ runLine . blocks =<<) . lift . readFile
       modify (\ st -> st { imports = imports st ++ files })
 
 repl :: Env ()
