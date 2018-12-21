@@ -14,10 +14,8 @@ import Data.Function
 import Data.Char (isSpace)
 import Text.Megaparsec
 import Data.Void
-import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
-import Control.Applicative hiding (some)
 
 type Parser = Parsec Void String
 
@@ -34,7 +32,7 @@ parens :: Parser a -> Parser a
 parens = (between `on` symbol) "(" ")"
 
 lit :: Parser Term
-lit = Lit . read <$> lexeme (some digitChar) <?> "literal"
+lit = Var . read <$> lexeme (some digitChar) <?> "literal"
 
 word :: Parser String
 word = lexeme . some $ satisfy p where

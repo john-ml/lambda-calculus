@@ -4,7 +4,7 @@
 module LC
   ( Term (..)
   , mapExpr
-  , mapLits
+  , mapVars
   , mapHoles
   , pretty
   , substitute
@@ -18,7 +18,7 @@ module LC
 import Data.Map
 
 data Term
-  = Lit Int
+  = Var Int
   | Hole String
   | Term :$ Term
   | Λ Term
@@ -26,10 +26,10 @@ data Term
 infixl 6 :$
 
 instance Show Term where
-  show (Lit a)             = show a
-  show (f@(Λ _) :$ Lit a)  = "(" ++ show f ++ ") " ++ show a
+  show (Var a)             = show a
+  show (f@(Λ _) :$ Var a)  = "(" ++ show f ++ ") " ++ show a
   show (f@(Λ _) :$ Hole a) = "(" ++ show f ++ ") " ++ a
-  show (f :$ Lit a)        = show f ++ " " ++ show a
+  show (f :$ Var a)        = show f ++ " " ++ show a
   show (f :$ Hole a)       = show f ++ " " ++ a
   show (f :$ e)            = show f ++ " (" ++ show e ++ ")"
   show (Λ e)               = "λ " ++ show e ++ ""
@@ -41,16 +41,16 @@ mapExpr
   -> Term
   -> Term
 mapExpr f g = go 0 where
-  go n (Lit a)   = f n a
+  go n (Var a)   = f n a
   go n (Hole s)  = g n s
   go n (f' :$ e) = go n f' :$ go n e
   go n (Λ e)     = Λ (go (n + 1) e)
 
-mapLits :: (Int -> Int -> Term) -> Term -> Term
-mapLits f = mapExpr f (const Hole)
+mapVars :: (Int -> Int -> Term) -> Term -> Term
+mapVars f = mapExpr f (const Hole)
 
 mapHoles :: (Int -> String -> Term) -> Term -> Term
-mapHoles g = mapExpr (const Lit) g
+mapHoles g = mapExpr (const Var) g
 
 pretty :: Map String Term -> Term -> String
 pretty m = show . go 0 where
@@ -64,19 +64,19 @@ pretty m = show . go 0 where
   go _ e = e
 
   unchurch (Λ (Λ e)) = go' e where
-    go' (Lit 0)       = Just 0
-    go' (Lit 1 :$ e') = (1 +) <$> go' e'
+    go' (Var 0)       = Just 0
+    go' (Var 1 :$ e') = (1 +) <$> go' e'
     go' _             = Nothing
   unchurch _ = Nothing
 
 adjustFree :: (Int -> Int) -> Term -> Term
-adjustFree f = mapLits (\ n a -> if a >= n then Lit (f a) else Lit a)
+adjustFree f = mapVars (\ n a -> if a >= n then Var (f a) else Var a)
 
 substitute :: Term -> Term -> Term
-substitute e = mapLits (\ n a ->
-  if | a > n     -> Lit (pred a)
+substitute e = mapVars (\ n a ->
+  if | a > n     -> Var (pred a)
      | a == n    -> adjustFree (+ n) e
-     | otherwise -> Lit a)
+     | otherwise -> Var a)
 
 fill :: Map String Term -> Term -> Term
 fill m = mapHoles (\ n s ->
@@ -85,9 +85,9 @@ fill m = mapHoles (\ n s ->
     Nothing -> Hole s)
 
 reduce :: Term -> Term
-reduce (Lit a)      = Lit a
+reduce (Var a)      = Var a
 reduce (Λ e' :$ e)  = substitute e e'
-reduce (Lit n :$ e) = Lit n :$ reduce e
+reduce (Var n :$ e) = Var n :$ reduce e
 reduce (f :$ e)     = reduce f :$ e
 reduce (Λ e)        = Λ (reduce e)
 reduce (Hole s)     = Hole s
@@ -102,7 +102,7 @@ evaluate :: Term -> Term
 evaluate = whileNot (==) reduce
 
 sizeof :: Integral a => Term -> a
-sizeof (Lit _)  = 1
+sizeof (Var _)  = 1
 sizeof (Hole _) = 1
 sizeof (f :$ e) = 1 + sizeof f + sizeof e
 sizeof (Λ e)    = 1 + sizeof e
