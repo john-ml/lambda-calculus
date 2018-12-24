@@ -8,7 +8,8 @@ module LC
   , mapVars
   , mapHoles
   , pretty
-  , withNames
+  , typeWithNames
+  , termWithNames
   , substitute
   , fill
   , reduce
@@ -21,9 +22,8 @@ module LC
 
 import Data.Map
 import Control.Monad.Except
-import Data.Functor (($>))
-
-type CheckM = Except String
+import Data.List (intercalate)
+import Control.Monad.Writer
 
 data Term
   = Var Int
@@ -84,19 +84,28 @@ pretty m = show . go [] where
   go l e@(t :--> e') = try e (go l t :--> go (t : l) e')
   go _ e = e
 
-withNames :: Term -> String
-withNames = go 0 where
-  names = "" : (pure <$> letters) ++ (cat <$> [1..] <*> letters) where
-    letters = ['a' .. 'z']
-    cat n l = l : show n
-  go n (Var k) = names !! (n - k)
-  go _ (Hole s) = s
-  go n (f :$ e) = go n f ++ "(" ++ go n e ++ ")"
-  go n (f :--> e) = lhs ++ go (n + 1) e where
-    lhs
-      | occursFree 0 e = "∀ (" ++ (names !! (n + 1)) ++ " : " ++ go n f ++ "), "
-      | otherwise      = "(" ++ go n f ++ ") -> "
-  go _ (Type n) = "Type" ++ show n
+names :: [String]
+names = "" : (pure <$> letters) ++ (cat <$> [1..] <*> letters) where
+  letters = ['a' .. 'z']
+  cat n l = l : show n
+
+withNames :: Bool -> Term -> String
+withNames = flip go 0 where
+  go _ n (Var k) = names !! (n - k)
+  go _ _ (Hole s) = "[" ++ s ++ "]"
+  go p n (f :$ e) = go p n f ++ "(" ++ go p n e ++ ")"
+  go p n (f :--> e) = lhs p (occursFree 0 e) ++ go p (n + 1) e where
+    lhs True True   = "λ (" ++ (names !! (n + 1)) ++ " : " ++ go False n f ++ "). "
+    lhs True False  = "λ (_ : " ++ go False n f ++ "). " 
+    lhs False True  = "∀ (" ++ (names !! (n + 1)) ++ " : " ++ go False n f ++ "), "
+    lhs False False = "(" ++ go False n f ++ ") -> "
+  go _ _ (Type n) = "Type" ++ show n
+
+typeWithNames :: Term -> String
+typeWithNames = withNames False
+
+termWithNames :: Term -> String
+termWithNames = withNames True
 
 adjustFree :: (Int -> Int) -> Term -> Term
 adjustFree f = mapVars (\ l a ->
@@ -156,13 +165,40 @@ t :--> e `isSubtype` t' :--> e' = t `isSubtype` t' && e `isSubtype` e'
 Type n `isSubtype` Type m = n <= m
 _ `isSubtype` _ = False
 
-check' :: Env -> Term -> Type -> CheckM ()
-check' env e t = do
+type CheckM = ExceptT String (Writer String)
+
+prettyEnv :: Env -> String
+prettyEnv = intercalate "\n" . zipWith prettyEntry [0..] where
+  prettyEntry n t' = show n ++ " : " ++ show t'
+
+whisper :: String -> CheckM ()
+whisper = const $ return () --tell . (++ "\n")
+
+showHole :: Env -> String -> Maybe Type -> String
+showHole env s t =
+  unlines
+    [ "Found hole: " ++ s ++ (case t of Just t' -> " : " ++ show t'; Nothing -> "")
+    , "Context:"
+    ] ++
+  prettyEnv env
+
+check' :: Env -> Term -> (Type -> Type -> Bool) -> Type -> CheckM ()
+check' env (Hole s) _ t = throwError $ showHole env s (Just t)
+check' env e r t = do
   inferred <- infer' env e
-  if t `isSubtype` inferred then
+  whisper $
+    show inferred ++ " ~ " ++ show t ++ " = " ++
+    show (inferred `r` t)
+  if inferred `r` t then
      return ()
   else
-     throwError $ "Expected '" ++ show t ++ "', actual '" ++ show inferred ++ "'"
+     throwError $
+       unlines
+         [ "Expected '" ++ show t ++ "', actual '" ++ show inferred ++ "' in:"
+         , show e
+         , "Context:"
+         ] ++
+       prettyEnv env
 
 get :: Env -> Int -> CheckM Term
 get = go 0 where
@@ -173,19 +209,25 @@ get = go 0 where
 
 infer' :: Env -> Term -> CheckM Type
 infer' env (Var a) = get env a
-infer' _ (Hole _) = throwError "Found hole"
+infer' env (Hole s) = throwError $ showHole env s Nothing
 infer' env (f :$ e) = do
-  ft <- infer' env f
-  case ft of
-    t :--> et -> check' env e t $> adjustFree pred et
-    _ -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show ft
+  tf <- infer' env f
+  whisper $ "infer' env (" ++ show f ++ ") = " ++ show tf
+  whisper $ "Context:"
+  whisper $ prettyEnv env
+  case tf of
+    te :--> tret -> do
+      check' env e isSubtype te
+      whisper $ "check' env (" ++ show e ++ ") (" ++ show te ++ ") OK\n"
+      return (substitute e tret)
+    _ -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show tf
 infer' env (t :--> e) = do
   _ <- infer' env t
   (t :-->) <$> infer' (t : env) e
 infer' _ (Type n) = return $ Type (n + 1)
   
 check :: Term -> Type -> CheckM ()
-check = check' []
+check e t = check' [] e (flip isSubtype) t
 
 infer :: Term -> CheckM Type
 infer = infer' []

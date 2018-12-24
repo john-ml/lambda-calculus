@@ -21,23 +21,37 @@ prompt s = do
   hFlush stdout
   getLine
 -}
+import Control.Monad.Writer
 import Control.Monad.Except
 
 test :: IO ()
 test = do
-  -- fun<A, B> (f: A -> B) (x: A) = f(x)
+  -- fun (A B : Type0) (f : A -> B) (x : A) = f(x)
   tryInfer (Type 0 :--> Type 0 :--> Var 1 --> Var 0 :--> Var 2 :--> Var 1 :$ Var 0)
-  -- fun<A, B, C> (f: B -> C) (g: A -> B) (x: A) = f(g(x))
+  -- fun (A B C : Type0) (f : B -> C) (g : A -> B) (x : A) = f(g(x))
   tryInfer (Type 0 :--> Type 0 :--> Type 0 :-->
             Var 1 --> Var 0 :-->
             Var 3 --> Var 2 :-->
             Var 4 :-->
             Var 2 :$ (Var 1 :$ Var 0))
+  -- fun (f : (A : Type0) -> A -> A) (B : Type1) (x : B) = f(x)
+  tryInfer ((Type 0 :--> Var 0 --> Var 0) :-->
+            Type 1 :-->
+            Var 0 :-->
+            Var 2 :$ Var 1 :$ Var 0)
+  tryInfer ((Type 0 :--> Var 0 --> Var 0) :-->
+            Type 0 :-->
+            Var 0 :-->
+            Var 2 :$ Var 1 :$ Var 0)
+  tryInfer (Type 0 :--> Type 0 :--> Var 1 --> Var 0 :--> Var 2 :--> Var 1 :$ Hole "h")
   where
-    tryInfer e =
-      case runExcept (infer e) of
-        Left s -> putStrLn s
-        Right t -> putStrLn $ withNames t
+    tryInfer e = do
+      putStrLn $ termWithNames e
+      case runWriter . runExceptT $ infer e of
+        (Left s, w) -> putStrLn s >> putStrLn w
+        (Right t, w) -> do
+          putStrLn $ termWithNames e ++ "\n : " ++ typeWithNames t
+          putStrLn w
 
 {-
 type Parser = Parsec Void String
