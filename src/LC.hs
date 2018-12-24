@@ -38,7 +38,7 @@ type Type = Term
 type Env = [Type]
 
 (->:) :: Type -> Type -> Type
-a ->: b = Λ a b
+a ->: b = Λ a (adjustFree (+ 1) b)
 infixr 1 ->:
 
 occursFree :: Int -> Term -> Bool
@@ -52,8 +52,8 @@ instance Show Term where
   show (Var a)  = show a
   show (f :$ e) = "(" ++ show f ++ ") (" ++ show e ++ ")"
   show (Λ t e)
-    | occursFree 0 e = "λ {" ++ show t ++ "} " ++ show e
-    | otherwise      = "{" ++ show t ++ "} -> " ++ show e
+    | occursFree 0 e = "Λ {" ++ show t ++ "} " ++ show e
+    | otherwise      = "λ {" ++ show t ++ "} " ++ show e
   show (Hole s) = s
   show (Type n) = "Type" ++ show n
 
