@@ -1,38 +1,33 @@
 {-# LANGUAGE LambdaCase #-}
 import LC
+import Control.Monad.State
+{-
+import System.IO
 import Parser
 import Data.Char
 import Data.Void
 import Text.Megaparsec hiding (empty)
 import Text.Megaparsec.Char
 import Data.Function
-import System.IO
 import Data.Map
-import Control.Monad.State
 import Data.List (groupBy)
 
-church :: Int -> Term
-church n = Λ (Λ (iterate (Var 1 :$) (Var 0) !! n))
+--church :: Int -> Term
+--church n = Λ (Λ (iterate (Var 1 :$) (Var 0) !! n))
 
 prompt :: String -> IO String
 prompt s = do
   putStr s
   hFlush stdout
   getLine
+-}
+import Control.Monad.Except
 
 test :: IO ()
 test = do
-  print . evaluate $ church 2 :$ church 3
-  let ω = Λ (Var 0 :$ Var 0)
-  let s = Λ (Λ (Λ (Var 2 :$ Var 0 :$ (Var 1 :$ Var 0))))
-  let c = Λ (Λ (Λ (Var 2 :$ Var 0 :$ Var 1)))
-  print s
-  print c
-  print . evaluate $ ω :$ ω
-  let m = fromList [("abc", Var 0)]
-  print . fill m $ Λ (Hole "abc")
-  parseTest term "(λ λ 1 (1 (1 0))) 2 0"
+  print . runExcept $ infer (Λ (Type 0) (Λ (Var 0 ->: Var 0) (Λ (Var 1) (Var 1 :$ Var 0))))
 
+{-
 type Parser = Parsec Void String
 data Command = Query Term | Binding String Term | Use [String]
 
@@ -74,6 +69,7 @@ repl = forever $ do
   loaded <- imports <$> get
   s <- lift . prompt $ unwords loaded ++ "> "
   runLine s
+-}
 
 main :: IO ()
-main = void $ runStateT repl (StateType empty [])
+main = void $ test --runStateT repl (StateType empty [])
