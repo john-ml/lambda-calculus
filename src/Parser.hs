@@ -48,7 +48,7 @@ apps :: Parser Term
 apps = foldl1 (:$) <$> some simpleTerm
 
 lambda :: Parser Term
-lambda = Λ (Type 0) <$> (lexeme (satisfy (`elem` "λ\\")) *> term)
+lambda = (Type 0 :-->) <$> (lexeme (satisfy (`elem` "λ\\")) *> term)
 
 term :: Parser Term
 term = apps <|> simpleTerm

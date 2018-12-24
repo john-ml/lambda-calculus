@@ -25,7 +25,19 @@ import Control.Monad.Except
 
 test :: IO ()
 test = do
-  print . runExcept $ infer (Λ (Type 0) (Λ (Var 0 ->: Var 0) (Λ (Var 1) (Var 1 :$ Var 0))))
+  -- fun<A, B> (f: A -> B) (x: A) = f(x)
+  tryInfer (Type 0 :--> Type 0 :--> Var 1 --> Var 0 :--> Var 2 :--> Var 1 :$ Var 0)
+  -- fun<A, B, C> (f: B -> C) (g: A -> B) (x: A) = f(g(x))
+  tryInfer (Type 0 :--> Type 0 :--> Type 0 :-->
+            Var 1 --> Var 0 :-->
+            Var 3 --> Var 2 :-->
+            Var 4 :-->
+            Var 2 :$ (Var 1 :$ Var 0))
+  where
+    tryInfer e =
+      case runExcept (infer e) of
+        Left s -> putStrLn s
+        Right t -> putStrLn $ withNames t
 
 {-
 type Parser = Parsec Void String
