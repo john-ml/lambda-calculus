@@ -29,7 +29,6 @@ module LC
   ) where
 
 import           Numeric.Natural (Natural)
-import           Data.Function (on)
 import           Data.Bifunctor (Bifunctor, first, second)
 import           Data.Set (Set)
 import qualified Data.Set as Set
@@ -198,9 +197,6 @@ evaluate (runWriter . reduce -> (e', Any changed))
 
 type CheckM' a b = ExceptT String (State (Map b (Term' a b)))
 
-
--- need to change this to actually perform unification
--- == and unique bindings is not enough
 match' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
 match' s t
   | evalState (s ~= t) Bimap.empty = return ()
@@ -212,36 +208,35 @@ match' s t
       m <- get
       return $ Bimap.pairMember (a, a') m || a == a'
     App f e ~= App f' e' = (&&) <$> f ~= f' <*> e ~= e'
-    Lam a t e ~= Lam a' t' e' = do
+    Lam a t' e ~= Lam a' t'' e' = do
       modify $ Bimap.insert a a'
-      (&&) <$> t ~= t' <*> e ~= e'
-    Ann e t ~= Ann e' t' = (&&) <$> e ~= e' <*> t ~= t'
+      (&&) <$> t' ~= t'' <*> e ~= e'
+    Ann e t' ~= Ann e' t'' = (&&) <$> e ~= e' <*> t' ~= t''
     Type u ~= Type u' = return $ u == u'
     _ ~= _ = return False
 
-checkM :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
-checkM (Hole a) t = throwError $ "Found hole: " ++ show a ++ " : " ++ show t
-checkM e t = inferM e >>= match' t
+check' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
+check' (Hole a) t = throwError $ "Found hole: " ++ show a ++ " : " ++ show t
+check' e t = infer' e >>= match' t
 
--- assumes unique bindings?
-inferM :: (Show a, Show b, Eq a, Ord b) => Term' a b -> CheckM' a b (Term' a b)
-inferM (Hole a) = throwError $ "Found hole: " ++ show a
-inferM (Var a) = do
+infer' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> CheckM' a b (Term' a b)
+infer' (Hole a) = throwError $ "Found hole: " ++ show a
+infer' (Var a) = do
   context <- get
   case context !? a of
     Just t' -> return t'
     Nothing -> throwError $ "Variable not in scope: " ++ show a
-inferM (App f e) = do
-  tf <- inferM f
+infer' (App f e) = do
+  tf <- infer' f
   case tf of
-    Lam a t e' -> checkM e t $> substitute a e e' -- assumes unique bindings?
+    Lam a t e' -> check' e t $> substitute a e e'
     _ -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show tf
-inferM (Lam a t e) = do
-  _ <- inferM t
+infer' (Lam a t e) = do
+  _ <- infer' t
   modify $ Map.insert a t
-  Lam a t <$> inferM e
-inferM (Ann e t) = checkM e t $> t
-inferM (Type u) = return $ Type u
+  Lam a t <$> infer' e
+infer' (Ann e t) = check' e t $> t
+infer' (Type u) = return $ Type u
 
 infer :: (Show a, Eq a) => Term a -> Either String (Term a)
-infer = flip evalState Map.empty . runExceptT . inferM . unique
+infer = flip evalState Map.empty . runExceptT . infer' . unique
