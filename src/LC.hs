@@ -170,8 +170,7 @@ type Term a = Term' a Name
 fresh :: [Name]
 fresh = fresh' (Name . pure <$> ['a' .. 'z']) (Name . show <$> [0..])
 
--- make bindings unique
--- alpha-equivalent expressions will always yield same results
+-- make bindings unique; alpha-equivalent expressions will always yield same results
 unique :: Term a -> Term a
 unique = flip evalState (fresh, Bimap.empty) . unique'
 
@@ -199,10 +198,26 @@ evaluate (runWriter . reduce -> (e', Any changed))
 
 type CheckM' a b = ExceptT String (State (Map b (Term' a b)))
 
+
+-- need to change this to actually perform unification
+-- == and unique bindings is not enough
 match' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
 match' s t
-  | s == t = return ()
+  | evalState (s ~= t) Bimap.empty = return ()
   | otherwise = throwError $ "Can't match '" ++ show s ++ "' with '" ++ show t ++ "'"
+  where
+    infixl 5 ~=
+    Hole a ~= Hole a' = return $ a == a'
+    Var a ~= Var a' = do
+      m <- get
+      return $ Bimap.pairMember (a, a') m || a == a'
+    App f e ~= App f' e' = (&&) <$> f ~= f' <*> e ~= e'
+    Lam a t e ~= Lam a' t' e' = do
+      modify $ Bimap.insert a a'
+      (&&) <$> t ~= t' <*> e ~= e'
+    Ann e t ~= Ann e' t' = (&&) <$> e ~= e' <*> t ~= t'
+    Type u ~= Type u' = return $ u == u'
+    _ ~= _ = return False
 
 checkM :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
 checkM (Hole a) t = throwError $ "Found hole: " ++ show a ++ " : " ++ show t
