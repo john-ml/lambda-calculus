@@ -24,6 +24,7 @@ dependencies:
 - containers
 - megaparsec >= 7.0.4
 - mtl
+- bimap
 
 library:
   source-dirs: src

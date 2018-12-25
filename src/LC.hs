@@ -1,233 +1,232 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiWayIf #-}
-
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
 module LC
-  ( Term (..)
-  , (-->)
-  , mapExpr
-  , mapVars
-  , mapHoles
-  , pretty
-  , typeWithNames
-  , termWithNames
+  ( Universe
+  , Term
+  , Universe' (..)
+  , Term' (..)
+  , Name (..)
+  , fresh
+  , names
+  , showTerm
+  , showType
+  , flatMap
+  , unique
   , substitute
-  , fill
+  , occursFree
+  , termBind
   , reduce
-  , sizeof
-  , simplify
+  , step
+  , execute
   , evaluate
-  , check
   , infer
   ) where
 
-import Data.Map
-import Control.Monad.Except
-import Data.List (intercalate)
-import Control.Monad.Writer
+import           Numeric.Natural (Natural)
+import           Data.Function (on)
+import           Data.Bifunctor (Bifunctor, first, second)
+import           Data.Set (Set)
+import qualified Data.Set as Set
+import           Data.Map (Map, (!?))
+import qualified Data.Map as Map
+import           Data.Bimap (Bimap, (!))
+import qualified Data.Bimap as Bimap
+import           Control.Monad.State
+import           Control.Monad.Except
+import           Control.Monad.Writer
+import           Data.Functor (($>))
 
-data Term
-  = Var Int
-  | Hole String
-  | Term :$ Term
-  | Term :--> Term
-  | Type Int
-  deriving (Eq, Ord)
-infixl 7 :$
-infixr 5 :-->
+data Universe' a
+  = UVar a
+  | UMax (Universe' a) (Universe' a)
+  | UAdd (Universe' a) (Universe' a)
+  | ULit Natural
+  deriving (Eq, Ord, Functor, Foldable, Traversable)
 
-type Type = Term
-type Env = [Type]
+instance Show a => Show (Universe' a) where
+  show (UVar a) = show a
+  show (UMax a b) = "(" ++ show a ++ " /\\ " ++ show b ++ ")"
+  show (UAdd a b) = show a ++ " + " ++ show b
+  show (ULit n) = show n
 
-(-->) :: Type -> Type -> Type
-a --> b = a :--> adjustFree (+ 1) b
-infixr 6 -->
+data Term' a b
+  = Hole a
+  | Var b
+  | App (Term' a b) (Term' a b)
+  | Lam b (Term' a b) (Term' a b)
+  | Ann (Term' a b) (Term' a b)
+  | Type (Universe' b)
+  deriving (Eq, Ord, Functor, Foldable, Traversable)
 
-occursFree :: Int -> Term -> Bool
-occursFree n (Var a) = a == n
-occursFree _ (Hole _) = False
-occursFree n (f :$ e) = occursFree n f || occursFree n e
-occursFree n (t :--> e) = occursFree n t || occursFree (n + 1) e
-occursFree _ (Type _) = False
+instance Applicative Universe' where
+  pure = UVar
+  a <*> b = a >>= \ f -> b >>= \ x -> return $ f x
 
-instance Show Term where
-  show (Var a)  = show a
-  show (f :$ e) = "(" ++ show f ++ ") (" ++ show e ++ ")"
-  show (t :--> e)
-    | occursFree 0 e = "λ (" ++ show t ++ ") " ++ show e ++ ""
-    | otherwise      = "(" ++ show t ++ ") -> " ++ show e ++ ""
-  show (Hole s) = s
-  show (Type n) = "Type" ++ show n
+instance Monad Universe' where
+  UVar a >>= f = f a
+  UMax a b >>= f = UMax (a >>= f) (b >>= f)
+  UAdd a b >>= f = UAdd (a >>= f) (b >>= f)
+  ULit a >>= _ = ULit a
 
-mapExpr
-  :: (Env -> Int -> Term)
-  -> (Env -> String -> Term)
-  -> Term
-  -> Term
-mapExpr f g = go [] where
-  go l (Var a)   = f l a
-  go l (Hole s)  = g l s
-  go l (f' :$ e) = go l f' :$ go l e
-  go l (t :--> e) = go l t :--> go (t : l) e
-  go _ (Type n)  = Type n
+flatMap :: (b -> Term' a b) -> (b -> Universe' b) -> Term' a b -> Term' a b
+flatMap _ _ (Hole a)    = Hole a
+flatMap f _ (Var a)     = f a
+flatMap f g (App a b)   = App (flatMap f g a) (flatMap f g b)
+flatMap f g (Lam a t e) = Lam a (flatMap f g t) (flatMap f g e)
+flatMap f g (Ann e t)   = Ann (flatMap f g e) (flatMap f g t)
+flatMap _ g (Type u)    = Type (u >>= g)
 
-mapVars :: (Env -> Int -> Term) -> Term -> Term
-mapVars f = mapExpr f (const Hole)
+termBind :: Term' a b -> (b -> Term' a b) -> Term' a b
+m `termBind` f = flatMap f pure m
 
-mapHoles :: (Env -> String -> Term) -> Term -> Term
-mapHoles g = mapExpr (const Var) g
+occursFree :: Eq b => b -> Term' a b -> Bool
+occursFree b = any (== b)
 
-pretty :: Map String Term -> Term -> String
-pretty m = show . go [] where
-  m' = fromList $ (\ (x, y) -> (y, x)) <$> toList m
-  try e handler = maybe handler Hole (m' !? e)
-  go l e@(f :$ e') = try e (go l f :$ go l e')
-  go l e@(t :--> e') = try e (go l t :--> go (t : l) e')
-  go _ e = e
+showExpr :: (Eq b, Show a, Show b) => Bool -> Term' a b -> String
+showExpr isType = \case
+  Hole a    -> "?" ++ show a
+  Var a     -> show a
+  App f e   -> goLamPar f ++ " (" ++ go e ++ ")"
+  Lam a t e ->
+    let (p, q) = (isType, occursFree a e) in
+    if | p && q     -> "∀ " ++ show a ++ " : " ++ go t ++ ", " ++ go e
+       | p && not q -> goVarPar t ++ " -> " ++ go e
+       | otherwise  -> "λ " ++ show a ++ " : " ++ showExpr True t ++ ". " ++ go e
+  Ann e t   -> go e ++ " : " ++ go t
+  Type u    -> "Type " ++ show u
+  where
+    go = showExpr isType
 
-names :: [String]
-names = "" : (pure <$> letters) ++ (cat <$> [1..] <*> letters) where
-  letters = ['a' .. 'z']
-  cat n l = l : show n
+    goLamPar f@(Lam _ _ _) = "(" ++ go f ++ ")"
+    goLamPar f = go f
 
-withNames :: Bool -> Term -> String
-withNames = flip go 0 where
-  go _ n (Var k) = names !! (n - k)
-  go _ _ (Hole s) = "[" ++ s ++ "]"
-  go p n (f :$ e) = go p n f ++ "(" ++ go p n e ++ ")"
-  go p n (f :--> e) = lhs p (occursFree 0 e) ++ go p (n + 1) e where
-    lhs True True   = "λ (" ++ (names !! (n + 1)) ++ " : " ++ go False n f ++ "). "
-    lhs True False  = "λ (_ : " ++ go False n f ++ "). " 
-    lhs False True  = "∀ (" ++ (names !! (n + 1)) ++ " : " ++ go False n f ++ "), "
-    lhs False False = "(" ++ go False n f ++ ") -> "
-  go _ _ (Type n) = "Type" ++ show n
+    goVarPar v@(Var _) = go v
+    goVarPar v = "(" ++ go v ++ ")"
 
-typeWithNames :: Term -> String
-typeWithNames = withNames False
+showTerm :: (Eq b, Show a, Show b) => Term' a b -> String
+showTerm = showExpr False
 
-termWithNames :: Term -> String
-termWithNames = withNames True
+showType :: (Eq b, Show a, Show b) => Term' a b -> String
+showType = showExpr True
 
-adjustFree :: (Int -> Int) -> Term -> Term
-adjustFree f = mapVars (\ l a ->
-  let n = fromIntegral $ length l in
-  if a >= n then Var (f a) else Var a)
+instance (Eq b, Show a, Show b) => Show (Term' a b) where
+  show = showTerm
 
-substitute :: Term -> Term -> Term
-substitute e = mapVars (\ l a ->
-  let n = fromIntegral $ length l in
-  if | a > n     -> Var (a - 1)
-     | a == n    -> adjustFree (+ n) e
-     | otherwise -> Var a)
+instance Bifunctor Term' where
+  first f (Hole a)    = Hole (f a)
+  first _ (Var b)     = Var b
+  first f (App f' e)  = App (first f f') (first f e)
+  first f (Lam a t e) = Lam a (first f t) (first f e)
+  first f (Ann e t)   = Ann (first f e) (first f t)
+  first _ (Type u)    = Type u
 
-fill :: Map String Term -> Term -> Term
-fill m = mapHoles (\ l s ->
-  let n = fromIntegral $ length l in
-  case m !? s of
-    Just e  -> adjustFree (+ n) e
-    Nothing -> Hole s)
+  second = fmap
 
-reduce :: Term -> Term
-reduce (Var a)       = Var a
-reduce ((_ :--> e') :$ e) = substitute e e'
-reduce (Var n :$ e)  = Var n :$ reduce e
-reduce (f :$ e)      = reduce f :$ e
-reduce (t :--> e)     = reduce t :--> reduce e
-reduce (Hole s)      = Hole s
-reduce (Type n)      = Type n
+-- suffixes should be infinite
+fresh' :: Semigroup a => [a] -> [a] -> [a]
+fresh' prefixes suffixes = prefixes ++ (flip (<>) <$> suffixes <*> prefixes)
 
-simplify :: Int -> Term -> Term
-simplify steps e =
-  let e'  = whileNot (\ a' a -> sizeof a' > sizeof a || a' == a) reduce e in
-  let e'' = iterate reduce e' !! steps in
-  if sizeof e'' < sizeof e' then e'' else e'
+names :: Ord b => Term' a b -> Set b
+names = foldr Set.insert Set.empty
 
-evaluate :: Term -> Term
-evaluate = whileNot (==) reduce
+-- assumes infinite [c]
+unique' :: (Ord b, Ord c) => Term' a b -> State ([c], Bimap b c) (Term' a c)
+unique' = \case
+  Hole a    -> return $ Hole a
+  Var a     -> Var <$> rename a where
+  App f e   -> App <$> unique' f <*> unique' e
+  Ann e t   -> Ann <$> unique' e <*> unique' t
+  Type u    -> Type <$> traverse rename u
+  Lam a t e -> do
+    new <- gensym a
+    Lam new <$> unique' t <*> unique' e
+  where
+    rename a = do
+      (_, m) <- get
+      maybe (gensym a) return $ Bimap.lookup a m
+    gensym a = do
+      (l, m) <- get
+      let new : l' = filter (not . flip Bimap.memberR m) l
+      put (l', Bimap.insert a new m)
+      return new
 
-sizeof :: Integral a => Term -> a
-sizeof (Var _)  = 1
-sizeof (Hole _) = 1
-sizeof (f :$ e) = 1 + sizeof f + sizeof e
-sizeof (t :--> e)  = 1 + sizeof t + sizeof e
-sizeof (Type _) = 1
+-- assumes all bindings are unique
+substitute :: Eq b => b -> Term' a b -> Term' a b -> Term' a b
+substitute a e' = flip termBind $ \ a' -> if a == a' then e' else Var a'
 
-whileNot :: (a -> a -> Bool) -> (a -> a) -> a -> a
-whileNot p f a =
-  let a' = f a in
-  if p a' a then a else whileNot p f a'
+newtype Name = Name { unName :: String } deriving (Eq, Ord, Semigroup)
+instance Show Name where show = unName
 
-isSubtype :: Type -> Type -> Bool
-infix 4 `isSubtype`
-Var a `isSubtype` Var b = a == b
-Hole a`isSubtype`  Hole b = a == b
-f :$ e `isSubtype` f' :$ e' = f `isSubtype` f' && e `isSubtype` e'
-t :--> e `isSubtype` t' :--> e' = t `isSubtype` t' && e `isSubtype` e'
-Type n `isSubtype` Type m = n <= m
-_ `isSubtype` _ = False
+type Universe = Universe' Name
+type Term a = Term' a Name
 
-type CheckM = ExceptT String (Writer String)
+-- infinite
+fresh :: [Name]
+fresh = fresh' (Name . pure <$> ['a' .. 'z']) (Name . show <$> [0..])
 
-prettyEnv :: Env -> String
-prettyEnv = intercalate "\n" . zipWith prettyEntry [0..] where
-  prettyEntry n t' = show n ++ " : " ++ show t'
+-- make bindings unique
+-- alpha-equivalent expressions will always yield same results
+unique :: Term a -> Term a
+unique = flip evalState (fresh, Bimap.empty) . unique'
 
-whisper :: String -> CheckM ()
-whisper = const $ return () --tell . (++ "\n")
+type EvalM = Writer Any
 
-showHole :: Env -> String -> Maybe Type -> String
-showHole env s t =
-  unlines
-    [ "Found hole: " ++ s ++ (case t of Just t' -> " : " ++ show t'; Nothing -> "")
-    , "Context:"
-    ] ++
-  prettyEnv env
+reduce :: Term a -> EvalM (Term a)
+reduce (Hole a) = pure $ Hole a
+reduce (Var a) = pure $ Var a
+reduce (App (Lam a _ e) e') = tell (Any True) $> substitute a e' e
+reduce (App f e) = App <$> reduce f <*> pure e
+reduce (Lam a t e) = Lam a <$> reduce t <*> reduce e
+reduce (Ann e t) = Ann <$> reduce e <*> reduce t
+reduce (Type u) = pure $ Type u
 
-check' :: Env -> Term -> (Type -> Type -> Bool) -> Type -> CheckM ()
-check' env (Hole s) _ t = throwError $ showHole env s (Just t)
-check' env e r t = do
-  inferred <- infer' env e
-  whisper $
-    show inferred ++ " ~ " ++ show t ++ " = " ++
-    show (inferred `r` t)
-  if inferred `r` t then
-     return ()
-  else
-     throwError $
-       unlines
-         [ "Expected '" ++ show t ++ "', actual '" ++ show inferred ++ "' in:"
-         , show e
-         , "Context:"
-         ] ++
-       prettyEnv env
+step :: Term a -> Term a
+step = fst . runWriter . reduce 
 
-get :: Env -> Int -> CheckM Term
-get = go 0 where
-  go _ [] _ = throwError $ "get failed"
-  go k (h : t) n
-    | k == n = return $ adjustFree (+ (k + 1)) h
-    | otherwise = go (k + 1) t n
+execute :: Term a -> [Term a]
+execute = iterate step
 
-infer' :: Env -> Term -> CheckM Type
-infer' env (Var a) = get env a
-infer' env (Hole s) = throwError $ showHole env s Nothing
-infer' env (f :$ e) = do
-  tf <- infer' env f
-  whisper $ "infer' env (" ++ show f ++ ") = " ++ show tf
-  whisper $ "Context:"
-  whisper $ prettyEnv env
+evaluate :: Term a -> Term a
+evaluate (runWriter . reduce -> (e', Any changed))
+  | changed = evaluate e'
+  | otherwise = e'
+
+type CheckM' a b = ExceptT String (State (Map b (Term' a b)))
+
+match' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
+match' s t
+  | s == t = return ()
+  | otherwise = throwError $ "Can't match '" ++ show s ++ "' with '" ++ show t ++ "'"
+
+checkM :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
+checkM (Hole a) t = throwError $ "Found hole: " ++ show a ++ " : " ++ show t
+checkM e t = inferM e >>= match' t
+
+-- assumes unique bindings?
+inferM :: (Show a, Show b, Eq a, Ord b) => Term' a b -> CheckM' a b (Term' a b)
+inferM (Hole a) = throwError $ "Found hole: " ++ show a
+inferM (Var a) = do
+  context <- get
+  case context !? a of
+    Just t' -> return t'
+    Nothing -> throwError $ "Variable not in scope: " ++ show a
+inferM (App f e) = do
+  tf <- inferM f
   case tf of
-    te :--> tret -> do
-      check' env e isSubtype te
-      whisper $ "check' env (" ++ show e ++ ") (" ++ show te ++ ") OK\n"
-      return (substitute e tret)
+    Lam a t e' -> checkM e t $> substitute a e e' -- assumes unique bindings?
     _ -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show tf
-infer' env (t :--> e) = do
-  _ <- infer' env t
-  (t :-->) <$> infer' (t : env) e
-infer' _ (Type n) = return $ Type (n + 1)
-  
-check :: Term -> Type -> CheckM ()
-check e t = check' [] e (flip isSubtype) t
+inferM (Lam a t e) = do
+  _ <- inferM t
+  modify $ Map.insert a t
+  Lam a t <$> inferM e
+inferM (Ann e t) = checkM e t $> t
+inferM (Type u) = return $ Type u
 
-infer :: Term -> CheckM Type
-infer = infer' []
+infer :: (Show a, Eq a) => Term a -> Either String (Term a)
+infer = flip evalState Map.empty . runExceptT . inferM . unique

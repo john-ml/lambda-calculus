@@ -1,101 +1,50 @@
-{-# LANGUAGE LambdaCase #-}
 import LC
-import Control.Monad.State
-{-
-import System.IO
 import Parser
-import Data.Char
-import Data.Void
-import Text.Megaparsec hiding (empty)
-import Text.Megaparsec.Char
-import Data.Function
-import Data.Map
-import Data.List (groupBy)
 
---church :: Int -> Term
---church n = Λ (Λ (iterate (Var 1 :$) (Var 0) !! n))
-
-prompt :: String -> IO String
-prompt s = do
-  putStr s
-  hFlush stdout
-  getLine
--}
-import Control.Monad.Writer
-import Control.Monad.Except
-
-test :: IO ()
-test = do
-  -- fun (A B : Type0) (f : A -> B) (x : A) = f(x)
-  tryInfer (Type 0 :--> Type 0 :--> Var 1 --> Var 0 :--> Var 2 :--> Var 1 :$ Var 0)
-  -- fun (A B C : Type0) (f : B -> C) (g : A -> B) (x : A) = f(g(x))
-  tryInfer (Type 0 :--> Type 0 :--> Type 0 :-->
-            Var 1 --> Var 0 :-->
-            Var 3 --> Var 2 :-->
-            Var 4 :-->
-            Var 2 :$ (Var 1 :$ Var 0))
-  -- fun (f : (A : Type0) -> A -> A) (B : Type1) (x : B) = f(x)
-  tryInfer ((Type 0 :--> Var 0 --> Var 0) :-->
-            Type 1 :-->
-            Var 0 :-->
-            Var 2 :$ Var 1 :$ Var 0)
-  tryInfer ((Type 0 :--> Var 0 --> Var 0) :-->
-            Type 0 :-->
-            Var 0 :-->
-            Var 2 :$ Var 1 :$ Var 0)
-  tryInfer (Type 0 :--> Type 0 :--> Var 1 --> Var 0 :--> Var 2 :--> Var 1 :$ Hole "h")
-  where
-    tryInfer e = do
-      putStrLn $ termWithNames e
-      case runWriter . runExceptT $ infer e of
-        (Left s, w) -> putStrLn s >> putStrLn w
-        (Right t, w) -> do
-          putStrLn $ termWithNames e ++ "\n : " ++ typeWithNames t
-          putStrLn w
-
-{-
-type Parser = Parsec Void String
-data Command = Query Term | Binding String Term | Use [String]
-
-userInput :: Parser Command
-userInput = try directive <|> try definition <|> Query <$> term where
-  directive = symbol ":" *> word >>= \case
-    "use" -> Use <$> some word
-    s -> fail $ "Unknown command '" ++ s ++ "'"
-  definition = Binding <$> word <* lexeme (string "=") <*> term
-
-data StateType = StateType
-  { bindings :: Map String Term
-  , imports :: [String]
-  }
-type Env = StateT StateType IO
-
-blocks :: String -> [String]
-blocks = (concat <$>) . groupBy ((<) `on` indent) . lines where
-  indent = length . takeWhile isSpace
-
-runLine :: String -> Env ()
-runLine "" = return ()
-runLine ('#' : _) = return ()
-runLine s =
-  case runParser userInput "" s of
-    Left e -> lift . putStrLn $ errorBundlePretty e
-    Right (Query e) -> do
-      m <- bindings <$> get
-      lift . putStrLn . pretty m . evaluate $ fill m e
-    Right (Binding s' e) -> do
-      m <- bindings <$> get
-      modify (\ st -> st { bindings = insert s' (simplify 100 (fill m e)) m })
-    Right (Use files) -> do
-      forM_ files $ (mapM_ runLine . blocks =<<) . lift . readFile
-      modify (\ st -> st { imports = imports st ++ files })
-
-repl :: Env ()
-repl = forever $ do
-  loaded <- imports <$> get
-  s <- lift . prompt $ unwords loaded ++ "> "
-  runLine s
--}
+import Control.Monad (forever)
 
 main :: IO ()
-main = void $ test --runStateT repl (StateType empty [])
+main = do
+  --case runParser universe "" "Type" of
+  --  Right t -> print t
+  --  Left e -> putStrLn $ errorBundlePretty e
+  testParse "∀ a: Type 0. ∀ b: Type 0. λ f: (λ _: a. b). λ x: a. f x"
+  testParse "∀ a: Type t, ∀ a: Type t1, ∀ t2: Type t + 1 ∧ t1 + (t ∧ t1), a"
+  testExecute
+    "(λ a: Type 0. (λ b: Type 0. (λ f: (λ _: a. b). (λ x: a. f (x))))) (t) (t1) (f) (x)"
+
+  testParse "∀ A : Type 0, ∀ B : Type 0, λ a : A, λ b : B, a"
+  testInfer "∀ A : Type 0, ∀ B : Type 0, λ a : A, λ b : B, a"
+
+  testParse "∀ A : Type 0, ∀ B : Type 0, λ f : (∀ a : A, B), λ x : A, f x"
+  testInfer "∀ A : Type 0, ∀ B : Type 0, λ f : (∀ a : A, B), λ x : A, f x"
+
+  testParse $
+    "∀ A : Type 0, ∀ B : Type 0, ∀ C : Type 0, " ++
+    "λ f : (∀ b : B, C), λ g : (∀ a : A, B), λ x : A, f (g x)"
+  testInfer $
+    "∀ A : Type 0, ∀ B : Type 0, ∀ C : Type 0, " ++
+    "λ f : (∀ b : B, C), λ g : (∀ a : A, B), λ x : A, f (g x)"
+
+  testInfer $
+    "∀ A : Type 0, ∀ B : Type 0, ∀ C : Type 0, " ++
+    "λ f : (λ a : A, λ b : B, C), λ x : B, λ y : A, f y x"
+
+  forever $ getLine >>= testParse
+
+  where
+    tryEither e f = flip (either putStrLn) e f
+    withParsed s = tryEither (parse s)
+
+    testParse s = withParsed s $ \ e -> do
+      print e
+      print (unique e)
+      putStrLn ""
+
+    testExecute s = withParsed s $ \ e -> do
+      _ <- traverse print . take 10 . execute $ e
+      putStrLn ""
+
+    testInfer s = withParsed s $ \ e -> do
+      tryEither (infer e) (putStrLn . showType)
+      putStrLn ""
