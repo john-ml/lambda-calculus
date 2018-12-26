@@ -210,13 +210,16 @@ normalize e =
 
 toZ3 :: MonadZ3 z3 => [Constraint] -> z3 Result
 toZ3 constraints = do
-  let nats = undefined <$> zipWith ((++) `on` vars) constraints
+  let vars = uncurry ((++) `on` foldr (:) []) =<< constraints
+  let nats = mkNat <$> vars
   let dnfs = dnf <$> constraints
-  assert =<< mkAnd =<< sequence (dnfs ++ undefined)
+  assert =<< mkAnd =<< sequence (nats ++ dnfs)
   solverCheck
   where
-    mkNat = undefined
-    vars = foldr (:) []
+    mkNat (Name var) = do
+      v <- mkFreshIntVar var
+      o <- mkInteger 0
+      mkLe o v
     dnf (l, r) = mkOr =<< sequence (clause (toList l) <$> toList r)
     clause ls r = mkAnd =<< sequence (go <$> ls) where
       go l = do
