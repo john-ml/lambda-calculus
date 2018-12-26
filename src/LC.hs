@@ -25,6 +25,8 @@ module LC
   , execute
   , evaluate
   , infer
+  , normalize
+  , toZ3
   ) where
 
 import Numeric.Natural (Natural)
@@ -35,7 +37,9 @@ import Control.Monad.Except
 import Data.List (genericIndex)
 import Data.Bifunctor (first, second)
 import Data.Functor (($>))
+import Data.Function (on)
 import Debug.Trace
+import Z3.Monad
 
 newtype Name = Name String deriving (Eq, Ord)
 instance Show Name where show (Name s) = s
@@ -45,7 +49,7 @@ data Universe' a
   | ULit Natural
   | UMax (Universe' a) (Universe' a)
   | UAdd (Universe' a) (Universe' a)
-  deriving (Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Functor, Foldable, Traversable)
 type Universe = Universe' Name
 
 data Term' u a
@@ -118,7 +122,7 @@ e ↑ k = flip mapTerm e $ \ l a -> if a >= len l then a + k else a
 
 free :: Integral a => a -> Term' u a -> Bool
 free k = getAny . execWriter . traverseTerm (\ l a ->
-  if a == k + len l then tell (Any True) else pure ())
+  if a == k + len l then tell (Any True) else return ())
 
 substitute :: Integral a => Term' u a -> Term' u a -> Term' u a
 substitute e' e = bindTerm e $ \ l a ->
@@ -128,11 +132,11 @@ substitute e' e = bindTerm e $ \ l a ->
      | otherwise -> Var a
 
 step' :: Integral a => Term' u a -> Writer Any (Term' u a)
-step' (Var a)              = pure $ Var a
-step' (App (Lam _ _ e) e') = pure $ substitute e' e
-step' (App f e)            = tell (Any True) *> (App <$> step' f <*> pure e)
+step' (Var a)              = return $ Var a
+step' (App (Lam _ _ e) e') = return $ substitute e' e
+step' (App f e)            = tell (Any True) *> (flip App e <$> step' f)
 step' (Lam a t e)          = Lam a <$> step' t <*> step' e
-step' (Type u)             = pure $ Type u
+step' (Type u)             = return $ Type u
 
 step :: Integral a => Term' u a -> Term' u a
 step e = fst . runWriter $ step' e
@@ -148,7 +152,7 @@ evaluate = last . execute
 
 type Constraint = (Universe, Universe)
 type Env = [(Name, Term)]
-type CheckM = ExceptT String (State (Env, [Constraint]))
+type CheckM = ExceptT String (StateT (Env, [Constraint]) IO)
 
 subtype :: Term -> Term -> CheckM Bool
 subtype (Var a) (Var a') = return $ a == a'
@@ -160,7 +164,7 @@ subtype (Type u) (Type u') = do
   return $ trace (show constraints) True
 subtype _ _ = return False
 
-checkSubtype :: Term -> Term -> ExceptT String (State (Env, [Constraint])) ()
+checkSubtype :: Term -> Term -> CheckM ()
 checkSubtype s t = subtype s t >>= \case
   True -> return ()
   False -> do
@@ -185,5 +189,44 @@ infer' (Lam a t e) =
   Lam a t <$> (infer' t *> modify (first ((a, t) :)) *> infer' e <* modify (first tail))
 infer' (Type u) = return $ Type (UAdd u (ULit 1))
 
-infer :: Term -> Either String Term
-infer = flip evalState ([], []) . runExceptT . infer'
+infer :: Term -> IO (Either String Term)
+infer = flip evalStateT ([], []) . runExceptT . infer'
+
+normalize' :: Eq a => Universe' a -> Universe' a
+normalize' = \case
+  UVar a            -> UVar a
+  ULit a            -> ULit a
+  UMax (UMax a b) c -> UMax (go a) (UMax (go b) (go c))
+  UMax a b          -> UMax (go a) (go b)
+  UAdd a (UMax b c) -> UMax (UAdd (go a) (go b)) (UAdd (go a) (go c))
+  UAdd (UMax a b) c -> UMax (UAdd (go a) (go c)) (UAdd (go b) (go c))
+  UAdd a b          -> UAdd (go a) (go b)
+  where go = normalize'
+
+normalize :: Eq a => Universe' a -> Universe' a
+normalize e =
+  let e' = normalize' e in
+  if e' == e then e' else normalize e'
+
+toZ3 :: MonadZ3 z3 => [Constraint] -> z3 Result
+toZ3 constraints = do
+  let nats = undefined <$> zipWith ((++) `on` vars) constraints
+  let dnfs = dnf <$> constraints
+  assert =<< mkAnd =<< sequence (dnfs ++ undefined)
+  solverCheck
+  where
+    mkNat = undefined
+    vars = foldr (:) []
+    dnf (l, r) = mkOr =<< sequence (clause (toList l) <$> toList r)
+    clause ls r = mkAnd =<< sequence (go <$> ls) where
+      go l = do
+        l' <- z3ify l
+        r' <- z3ify r
+        mkLe l' r'
+    toList a = go (normalize a) where
+      go (UMax h t) = h : go t
+      go e = [e]
+    z3ify (UVar (Name a)) = mkFreshIntVar a
+    z3ify (ULit n) = mkInteger $ fromIntegral n
+    z3ify (UAdd a b) = mkAdd =<< sequence [z3ify a, z3ify b]
+    z3ify (UMax _ _) = error $ "Impossible"

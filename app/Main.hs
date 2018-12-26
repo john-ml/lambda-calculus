@@ -46,5 +46,6 @@ main = do
       putStrLn ""
 
     testInfer s = withParsed s $ \ e -> do
-      tryEither (infer e) (putStrLn . showType)
+      t <- infer e
+      tryEither t (putStrLn . showType)
       putStrLn ""

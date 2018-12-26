@@ -25,6 +25,7 @@ dependencies:
 - megaparsec >= 7.0.4
 - mtl
 - bimap
+- z3
 
 library:
   source-dirs: src
