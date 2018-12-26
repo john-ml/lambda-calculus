@@ -1,4 +1,3 @@
-{-# LANGUAGE ViewPatterns #-}
 module Parser
   ( lexeme
   , symbol
@@ -16,16 +15,18 @@ import LC
 import Data.Function (on)
 import Numeric.Natural (Natural)
 import Data.Char (isSpace, isDigit)
-import Text.Megaparsec hiding (parse)
+import Text.Megaparsec hiding (parse, State)
 import Data.Void
 import Text.Megaparsec.Char
 import Control.Monad (guard)
+import Control.Monad.State
 import Data.Set (Set)
-import Data.List.NonEmpty (NonEmpty(..))
+import Data.List (elemIndex)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Set as Set
 import qualified Text.Megaparsec.Char.Lexer as L
 
-type Parser = Parsec Void String
+type Parser = ParsecT Void String (State [Name])
 
 sc :: Parser ()
 sc = L.space space1 empty empty
@@ -76,31 +77,36 @@ universe = try (UMax <$> total <*> (symbols ["/\\", "∧"] *> universe)) <|> tot
     lit = try (ULit <$> natural) <|> try (UVar <$> name) <|> parens universe
     total = try (UAdd <$> lit <*> (symbol "+" *> total)) <|> lit
 
-ty :: Parser (Term Void)
+ty :: Parser Term
 ty = Type <$> (symbol "Type" *> universe)
 
-var :: Parser (Term Void)
-var = Var <$> name <?> "variable"
+var :: Parser Term
+var = do
+  a <- name
+  bound <- get
+  case elemIndex a bound of
+    Just n -> return $ Var (fromIntegral n)
+    Nothing -> fail $ "Variable not in scope: " ++ show a ++ " " ++ show bound
 
-annotation :: Parser (Term Void)
-annotation = parens $ Ann <$> term <*> (symbol ":" *> term)
+simpleTerm :: Parser Term
+simpleTerm = tryAll [lambda, ty, var, parens term]
 
-simpleTerm :: Parser (Term Void)
-simpleTerm = tryAll [lambda, ty, var, annotation, parens term]
-
-apps :: Parser (Term Void)
+apps :: Parser Term
 apps = foldl1 App <$> some simpleTerm <?> "application"
 
-lambda :: Parser (Term Void)
-lambda = lam' <$> (prefix *> argument) <*> (separator *> term) where
-  prefix = symbols ["\\", "λ", "∀"]
-  argument = (,) <$> name <*> (symbol ":" *> term)
-  separator = symbols [".", ","]
-  lam' (a, t) e = Lam a t e
+lambda :: Parser Term
+lambda = do
+  a <- symbols ["\\", "λ", "∀"] *> name
+  t <- symbol ":" *> term <* symbols [".", ","]
+  modify (a :)
+  e <- Lam a t <$> term
+  modify tail
+  return e
 
-term :: Parser (Term Void)
+term :: Parser Term
 term = try apps <|> simpleTerm
 
-parse :: String -> Either String (Term Void)
-parse (runParser term "" -> Left e) = Left $ errorBundlePretty e
-parse (runParser term "" -> Right t) = Right t
+parse :: String -> Either String Term
+parse s = case evalState (runParserT term "" s) [] of
+  Left e -> Left $ errorBundlePretty e
+  Right t -> Right t
