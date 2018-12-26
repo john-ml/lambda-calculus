@@ -27,8 +27,8 @@ main = do
     "λ f : (∀ b : B, C), λ g : (∀ a : A, B), λ x : A, f (g x)"
 
   testInfer $
-    "∀ A : Type 0, ∀ B : Type 0, ∀ C : Type 0, " ++
-    "λ f : (λ a : A, λ b : B, C), λ x : B, λ y : A, f y x"
+    "∀ A : Type n, ∀ B : Type n, ∀ C : Type n, " ++
+    "λ f : (λ _ : A, λ _ : B, C), λ x : B, λ y : A, f y x"
 
   forever $ getLine >>= testParse
 

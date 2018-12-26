@@ -34,7 +34,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Map (Map, (!?))
 import qualified Data.Map as Map
-import           Data.Bimap (Bimap, (!))
+import           Data.Bimap (Bimap)
 import qualified Data.Bimap as Bimap
 import           Control.Monad.State
 import           Control.Monad.Except
@@ -195,25 +195,42 @@ evaluate (runWriter . reduce -> (e', Any changed))
   | changed = evaluate e'
   | otherwise = e'
 
-type CheckM' a b = ExceptT String (State (Map b (Term' a b)))
+data StateType a b = StateType
+  { bindings :: Map b (Term' a b)
+  , inequalities :: [(Universe' b, Universe' b)]
+  }
+
+mapBindings :: (Map c (Term' a c) -> Map c (Term' b c)) -> StateType a c -> StateType b c
+mapBindings f (StateType a b) = StateType (f a) b
+
+mapInequalities
+  :: ([(Universe' b, Universe' b)] -> [(Universe' b, Universe' b)])
+  -> StateType a b -> StateType a b
+mapInequalities f (StateType a b) = StateType a (f b)
+
+type CheckM' a b = ExceptT String (State (StateType a b))
 
 match' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
-match' s t
-  | evalState (s ~= t) Bimap.empty = return ()
-  | otherwise = throwError $ "Can't match '" ++ show s ++ "' with '" ++ show t ++ "'"
+match' s t = do
+  ok <- go s t Bimap.empty
+  if ok then
+    return ()
+  else
+    throwError $ "Can't match '" ++ show s ++ "' with '" ++ show t ++ "'"
   where
-    infixl 5 ~=
-    Hole a ~= Hole a' = return $ a == a'
-    Var a ~= Var a' = do
-      m <- get
-      return $ Bimap.pairMember (a, a') m || a == a'
-    App f e ~= App f' e' = (&&) <$> f ~= f' <*> e ~= e'
-    Lam a t' e ~= Lam a' t'' e' = do
-      modify $ Bimap.insert a a'
-      (&&) <$> t' ~= t'' <*> e ~= e'
-    Ann e t' ~= Ann e' t'' = (&&) <$> e ~= e' <*> t' ~= t''
-    Type u ~= Type u' = return $ u == u'
-    _ ~= _ = return False
+    go (Hole a) (Hole a') _ = return $ a == a'
+    go (Var a) (Var a') m = return $ a == a' || Bimap.pairMember (a, a') m
+    go (App f e) (App f' e') m = (&&) <$> go f f' m <*> go e e' m
+    go (Lam a t' e) (Lam a' t'' e') m =
+      let m' = Bimap.insert a a' m in
+      (&&) <$> go t' t'' m' <*> go e e' m'
+    go (Ann e t') (Ann e' t'') m = (&&) <$> go e e' m <*> go t' t'' m
+    go (Type u) (Type u') m = go' u u' m
+    go _ _ _ = return False
+
+    go' u u' _ = do
+      modify . mapInequalities $ ((u, u') :)
+      return True
 
 check' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> Term' a b -> CheckM' a b ()
 check' (Hole a) t = throwError $ "Found hole: " ++ show a ++ " : " ++ show t
@@ -222,7 +239,7 @@ check' e t = infer' e >>= match' t
 infer' :: (Show a, Show b, Eq a, Ord b) => Term' a b -> CheckM' a b (Term' a b)
 infer' (Hole a) = throwError $ "Found hole: " ++ show a
 infer' (Var a) = do
-  context <- get
+  context <- bindings <$> get
   case context !? a of
     Just t' -> return t'
     Nothing -> throwError $ "Variable not in scope: " ++ show a
@@ -233,10 +250,10 @@ infer' (App f e) = do
     _ -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show tf
 infer' (Lam a t e) = do
   _ <- infer' t
-  modify $ Map.insert a t
+  modify . mapBindings $ Map.insert a t
   Lam a t <$> infer' e
 infer' (Ann e t) = check' e t $> t
 infer' (Type u) = return $ Type u
 
 infer :: (Show a, Eq a) => Term a -> Either String (Term a)
-infer = flip evalState Map.empty . runExceptT . infer' . unique
+infer = flip evalState (StateType Map.empty []) . runExceptT . infer' . unique
