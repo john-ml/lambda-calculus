@@ -75,7 +75,7 @@ showExpr isType l = \case
   App f e   -> goLamPar f ++ " (" ++ go e ++ ")"
   Lam a t e ->
     let (p, q) = (isType, occursFree 0 e) in
-    if | p && q     -> "∀ " ++ show a ++ " : " ++ go t ++ ", " ++ goNest a e
+    if | p && q     -> "λ " ++ show a ++ " : " ++ go t ++ ", " ++ goNest a e
        | p && not q -> goVarPar t ++ " -> " ++ goNest a e
        | otherwise  -> "λ " ++ show a ++ " : " ++ showExpr True l t ++ ". " ++ goNest a e
   Type u -> "Type " ++ show u
