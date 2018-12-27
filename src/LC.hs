@@ -232,8 +232,8 @@ toSym constraints = do
   let clauses = uncurry ((.<=) `on` sym vars') <$> constraints
   return $ bAnd (nats ++ clauses)
   where
-    names = S.toList . S.fromList . concatMap (uncurry ((++) `on` foldr (:) [])) $ constraints
-    vars = M.fromList (zip names (exists . unName <$> names))
+    names = S.toList . foldMap (foldMap S.singleton . uncurry UAdd) $ constraints
+    vars = M.fromList $ zip names (exists . unName <$> names)
     sym _     (ULit n) = literal (fromIntegral n :: Integer)
     sym vars' (UVar s) = vars' ! s
     sym vars' (UMax a b) = smax (sym vars' a) (sym vars' b)
