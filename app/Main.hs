@@ -31,6 +31,10 @@ main = do
 
   testInfer $ "λ f : (∀ A : Type n, ∀ _ : A, A), ∀ B : Type 0, λ x : B, f B x"
 
+  testInfer $ "λ f : (∀ A : Type n, ∀ _ : A, A), ∀ B : Type n + 1, λ x : B, f B x"
+
+  testInfer $ "λ f : (∀ A : Type 0, ∀ _ : A, A), ∀ B : Type 1, λ x : B, f B x"
+
   forever $ getLine >>= testParse
 
   where

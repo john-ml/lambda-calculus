@@ -18,7 +18,7 @@ module LC
   , bindTerm
   , len
   , (↑)
-  , free
+  , occursFree
   , substitute
   , step'
   , step
@@ -26,22 +26,27 @@ module LC
   , evaluate
   , infer
   , normalize
-  , toZ3
+  , toSym
   ) where
 
 import Numeric.Natural (Natural)
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.Except
-import Data.List (genericIndex)
-import Data.Bifunctor (first, second)
+import Data.List (genericIndex, intercalate)
+import Data.Bifunctor (first, second, bimap)
 import Data.Functor (($>))
 import Data.Function (on)
 import Debug.Trace
-import Z3.Monad
+import Data.SBV hiding (showType)
+import Data.Set (Set)
+import Data.Map ((!), Map)
+import qualified Data.Set as S
+import qualified Data.Map as M
 
-newtype Name = Name String deriving (Eq, Ord)
+newtype Name = Name { unName :: String } deriving (Eq, Ord)
 instance Show Name where show (Name s) = s
 
 data Universe' a
@@ -73,7 +78,7 @@ showExpr isType l = \case
   Var a     -> if a >= len l then "?" ++ show a else show $ genericIndex l a
   App f e   -> goLamPar f ++ " (" ++ go e ++ ")"
   Lam a t e ->
-    let (p, q) = (isType, free 0 e) in
+    let (p, q) = (isType, occursFree 0 e) in
     if | p && q     -> "∀ " ++ show a ++ " : " ++ go t ++ ", " ++ goNest a e
        | p && not q -> goVarPar t ++ " -> " ++ goNest a e
        | otherwise  -> "λ " ++ show a ++ " : " ++ showExpr True l t ++ ". " ++ goNest a e
@@ -120,8 +125,8 @@ len = foldr (const (+ 1)) 0
 (↑) :: Integral a => Term' u a -> a -> Term' u a
 e ↑ k = flip mapTerm e $ \ l a -> if a >= len l then a + k else a
 
-free :: Integral a => a -> Term' u a -> Bool
-free k = getAny . execWriter . traverseTerm (\ l a ->
+occursFree :: Integral a => a -> Term' u a -> Bool
+occursFree k = getAny . execWriter . traverseTerm (\ l a ->
   if a == k + len l then tell (Any True) else return ())
 
 substitute :: Integral a => Term' u a -> Term' u a -> Term' u a
@@ -154,6 +159,13 @@ type Constraint = (Universe, Universe)
 type Env = [(Name, Term)]
 type CheckM = ExceptT String (StateT (Env, [Constraint]) IO)
 
+indent :: String -> String
+indent = intercalate "\n" . map ("  " ++) . lines
+
+showConstraints :: [Constraint] -> String
+showConstraints = intercalate "\n" . map (leq . bimap show show) where
+  leq (l, r) = l ++ " ≤ " ++ r
+
 subtype :: Term -> Term -> CheckM Bool
 subtype (Var a) (Var a') = return $ a == a'
 subtype (App f e) (App f' e') = (&&) <$> subtype f f' <*> subtype e e'
@@ -161,7 +173,12 @@ subtype (Lam _ t e) (Lam _ t' e') = (&&) <$> subtype t t' <*> subtype e e'
 subtype (Type u) (Type u') = do
   modify (second ((u, u') :))
   constraints <- snd <$> get
-  return $ trace (show constraints) True
+  result <- liftIO . sat $ toSym constraints
+  case result of
+    SatResult (Satisfiable _ _) -> return True
+    _ -> throwError $
+           "Universe consistency check failed:\n" ++ indent (show result) ++
+           "\nConstraints were:\n" ++ indent (showConstraints constraints)
 subtype _ _ = return False
 
 checkSubtype :: Term -> Term -> CheckM ()
@@ -208,28 +225,16 @@ normalize e =
   let e' = normalize' e in
   if e' == e then e' else normalize e'
 
-toZ3 :: MonadZ3 z3 => [Constraint] -> z3 Result
-toZ3 constraints = do
-  let vars = uncurry ((++) `on` foldr (:) []) =<< constraints
-  let nats = mkNat <$> vars
-  let dnfs = dnf <$> constraints
-  assert =<< mkAnd =<< sequence (nats ++ dnfs)
-  solverCheck
+toSym :: [Constraint] -> Symbolic SBool
+toSym constraints = do
+  vars' <- sequence vars
+  let nats = (literal 0 .<=) . snd <$> M.toList vars'
+  let clauses = uncurry ((.<=) `on` sym vars') <$> constraints
+  return $ bAnd (nats ++ clauses)
   where
-    mkNat (Name var) = do
-      v <- mkFreshIntVar var
-      o <- mkInteger 0
-      mkLe o v
-    dnf (l, r) = mkOr =<< sequence (clause (toList l) <$> toList r)
-    clause ls r = mkAnd =<< sequence (go <$> ls) where
-      go l = do
-        l' <- z3ify l
-        r' <- z3ify r
-        mkLe l' r'
-    toList a = go (normalize a) where
-      go (UMax h t) = h : go t
-      go e = [e]
-    z3ify (UVar (Name a)) = mkFreshIntVar a
-    z3ify (ULit n) = mkInteger $ fromIntegral n
-    z3ify (UAdd a b) = mkAdd =<< sequence [z3ify a, z3ify b]
-    z3ify (UMax _ _) = error $ "Impossible"
+    names = S.toList . S.fromList . concatMap (uncurry ((++) `on` foldr (:) [])) $ constraints
+    vars = M.fromList (zip names (exists . unName <$> names))
+    sym _     (ULit n) = literal (fromIntegral n :: Integer)
+    sym vars' (UVar s) = vars' ! s
+    sym vars' (UMax a b) = smax (sym vars' a) (sym vars' b)
+    sym vars' (UAdd a b) = sym vars' a + sym vars' b
