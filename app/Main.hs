@@ -30,7 +30,7 @@ test = do
     "λ f : A -> B -> C, λ x : B, λ y : A, f y x"
   testInfer $ "λ f : (∀ A : Type n, A -> A), ∀ B : Type 0, λ x : B, f B x"
   testInfer $ "λ f : (∀ A : Type n, A -> A), ∀ B : Type n + 1, λ x : B, f B x"
-  testInfer $ "λ f : (∀ A : Type 0, A -> A), ∀ B : Type 1, λ x : B, f B x"
+  testInfer $ "λ f : (∀ A : Type 1, A -> A), ∀ B : Type 0, λ x : B, f (Type 0) B"
 
 tryEither :: Either String b -> (b -> IO ()) -> IO ()
 tryEither e f = flip (either putStrLn) e f

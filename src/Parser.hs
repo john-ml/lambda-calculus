@@ -85,7 +85,7 @@ var env = do
 
 lambda :: [Name] -> Parser Term
 lambda env = do
-  a <- symbols ["\\", "λ", "∀"] *> name
+  a <- symbols ["\\", "λ"] *> name
   t <- symbol ":" *> term env <* symbols [".", ","]
   Lam a t <$> term (a : env)
 
