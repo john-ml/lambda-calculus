@@ -18,12 +18,8 @@ import Data.Char (isSpace, isDigit)
 import Text.Megaparsec hiding (parse, State)
 import Data.Void
 import Text.Megaparsec.Char
-import Control.Monad (guard)
 import Control.Monad.State
-import Data.Set (Set)
 import Data.List (elemIndex)
-import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Set as Set
 import qualified Text.Megaparsec.Char.Lexer as L
 
 type Parser = ParsecT Void String (State [Name])

@@ -30,7 +30,6 @@ module LC
   ) where
 
 import Numeric.Natural (Natural)
-import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
 import Control.Monad.State
@@ -39,10 +38,8 @@ import Data.List (genericIndex, intercalate)
 import Data.Bifunctor (first, second, bimap)
 import Data.Functor (($>))
 import Data.Function (on)
-import Debug.Trace
 import Data.SBV hiding (showType)
-import Data.Set (Set)
-import Data.Map ((!), Map)
+import Data.Map ((!))
 import qualified Data.Set as S
 import qualified Data.Map as M
 
@@ -136,21 +133,20 @@ substitute e' e = bindTerm e $ \ l a ->
      | a == n -> e' ↑ n
      | otherwise -> Var a
 
-step' :: Integral a => Term' u a -> Writer Any (Term' u a)
+step' :: Integral a => Term' u a -> State Bool (Term' u a)
 step' (Var a)              = return $ Var a
 step' (App (Lam _ _ e) e') = return $ substitute e' e
-step' (App f e)            = tell (Any True) *> (flip App e <$> step' f)
+step' (App f e)            = flip App e <$> step' f <* put True
 step' (Lam a t e)          = Lam a <$> step' t <*> step' e
 step' (Type u)             = return $ Type u
 
 step :: Integral a => Term' u a -> Term' u a
-step e = fst . runWriter $ step' e
+step e = evalState (step' e) False
 
 execute :: Integral a => Term' u a -> [Term' u a]
-execute e =
-  case runWriter (step' e) of
-    (e', Any True) -> e : execute e'
-    (e', _)        -> [e, e']
+execute e@(flip runState False . step' -> (e', changed))
+  | changed = e : execute e'
+  | otherwise = [e, e']
 
 evaluate :: Integral a => Term' u a -> Term' u a
 evaluate = last . execute
