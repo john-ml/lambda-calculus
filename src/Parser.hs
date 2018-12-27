@@ -22,7 +22,7 @@ import Control.Monad.State
 import Data.List (elemIndex)
 import qualified Text.Megaparsec.Char.Lexer as L
 
-type Parser = ParsecT Void String (State [Name])
+type Parser = Parsec Void String
 
 sc :: Parser ()
 sc = L.space space1 empty empty
@@ -76,33 +76,39 @@ universe = try (UMax <$> total <*> (symbols ["/\\", "∧"] *> universe)) <|> tot
 ty :: Parser Term
 ty = Type <$> (symbol "Type" *> universe)
 
-var :: Parser Term
-var = do
+var :: [Name] -> Parser Term
+var env = do
   a <- name
-  bound <- get
-  case elemIndex a bound of
+  case elemIndex a env of
     Just n -> return $ Var (fromIntegral n)
-    Nothing -> fail $ "Variable not in scope: " ++ show a ++ " " ++ show bound
+    Nothing -> fail $ "Variable not in scope: " ++ show a ++ " " ++ show env
 
-simpleTerm :: Parser Term
-simpleTerm = tryAll [lambda, ty, var, parens term]
-
-apps :: Parser Term
-apps = foldl1 App <$> some simpleTerm <?> "application"
-
-lambda :: Parser Term
-lambda = do
+lambda :: [Name] -> Parser Term
+lambda env = do
   a <- symbols ["\\", "λ", "∀"] *> name
-  t <- symbol ":" *> term <* symbols [".", ","]
-  modify (a :)
-  e <- Lam a t <$> term
-  modify tail
-  return e
+  t <- symbol ":" *> term env <* symbols [".", ","]
+  Lam a t <$> term (a : env)
 
-term :: Parser Term
-term = try apps <|> simpleTerm
+simpleTerm :: [Name] -> Parser Term
+simpleTerm env = tryAll [lambda env, ty, var env, parens (term env)]
+
+apps :: [Name] -> Parser Term
+apps env = foldl1 App <$> some (simpleTerm env) <?> "application"
+
+term' :: [Name] -> Parser Term
+term' env = try (apps env) <|> simpleTerm env
+
+constLambda :: [Name] -> Parser Term
+constLambda env = do
+  let dummy = Name "_"
+  a <- term' env
+  b <- symbols ["->", "→"] *> term (dummy : env)
+  return $ Lam dummy a b
+
+term :: [Name] -> Parser Term
+term env = try (constLambda env) <|> (term' env)
 
 parse :: String -> Either String Term
-parse s = case evalState (runParserT term "" s) [] of
+parse s = case runParser (term [] <* eof) "" s of
   Left e -> Left $ errorBundlePretty e
   Right t -> Right t

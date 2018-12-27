@@ -25,7 +25,6 @@ module LC
   , execute
   , evaluate
   , infer
-  , normalize
   , toSym
   ) where
 
@@ -195,31 +194,15 @@ infer' :: Term -> CheckM Term
 infer' (Var a) = (!? a) =<< map snd . fst <$> get
 infer' (App f e) = do
   tf <- infer' f
-  case tf of
+  case evaluate tf of
     Lam _ t e' -> (infer' e >>= (`checkSubtype` t)) $> substitute e e'
-    _ -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show tf
+    tf' -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show tf'
 infer' (Lam a t e) =
   Lam a t <$> (infer' t *> modify (first ((a, t) :)) *> infer' e <* modify (first tail))
 infer' (Type u) = return $ Type (UAdd u (ULit 1))
 
 infer :: Term -> IO (Either String Term)
 infer = flip evalStateT ([], []) . runExceptT . infer'
-
-normalize' :: Eq a => Universe' a -> Universe' a
-normalize' = \case
-  UVar a            -> UVar a
-  ULit a            -> ULit a
-  UMax (UMax a b) c -> UMax (go a) (UMax (go b) (go c))
-  UMax a b          -> UMax (go a) (go b)
-  UAdd a (UMax b c) -> UMax (UAdd (go a) (go b)) (UAdd (go a) (go c))
-  UAdd (UMax a b) c -> UMax (UAdd (go a) (go c)) (UAdd (go b) (go c))
-  UAdd a b          -> UAdd (go a) (go b)
-  where go = normalize'
-
-normalize :: Eq a => Universe' a -> Universe' a
-normalize e =
-  let e' = normalize' e in
-  if e' == e then e' else normalize e'
 
 toSym :: [Constraint] -> Symbolic SBool
 toSym constraints = do
