@@ -23,7 +23,7 @@ nat := λ A : Type n_nat, (A -> A) -> A -> A
 zero := λ A : Type n_nat, (A -> A) => λ a : A. a
 succ := λ n : nat. λ A : Type n_nat, λ f : A -> A. λ a : A. f (n A f a)
 plus := λ n : nat. λ m : nat. λ A : Type n_nat, λ f : A -> A. λ a : A. n A f (m A f a)
-mult := λ n : nat. λ m : nat. λ A : Type n_nat, λ f : A -> A. λ a : A. n (A -> A) (m A) f a
+exp := λ m : nat. λ n : nat. λ A : Type n_nat, λ f : A -> A. λ a : A. n (A -> A) (m A) f a
 
 pair :=
   λ A : Type n15, λ B : Type n16, λ a : A. λ b : B.
