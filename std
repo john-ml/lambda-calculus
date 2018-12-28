@@ -7,3 +7,4 @@ false := λ A : Type n3, A => λ b : A. b
 
 zero := λ A : Type n4, (A -> A) => λ a : A. a
 succ := λ n : nat. λ A : Type n5, λ f : A -> A. λ a : A. f (n A f a)
+plus := λ n : nat. λ m : nat. λ A : Type n6, λ f : A -> A. λ a : A. n A f (m A f a)
