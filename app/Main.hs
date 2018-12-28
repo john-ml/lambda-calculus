@@ -95,8 +95,8 @@ runLine s = do
     Left e -> liftIO . putStrLn $ errorBundlePretty e
     Right (Query e) -> liftIO $ do
      et <- run e
-     tryEither et $ \ (e', t) ->
-       putStrLn $ "(" ++ showTerm e' ++ ") : (" ++ showType t ++ ")"
+     tryEither et $ \ (e', t) -> putStrLn $
+       "(" ++ showTermPretty bindings e' ++ ") : (" ++ showTypePretty bindings t ++ ")"
     Right (Binding s' e) -> do
       modify . first $ M.insert s' e
     Right (Use files) -> do

@@ -12,6 +12,8 @@ module LC
   , Universe
   , showTerm
   , showType
+  , showTermPretty
+  , showTypePretty
   , traverseTerm
   , mapTerm
   , joinTerm
@@ -39,10 +41,9 @@ import Data.Bifunctor (first, second, bimap)
 import Data.Functor (($>))
 import Data.Function (on)
 import Data.SBV hiding (showType)
-import Data.Map ((!))
+import Data.Map (Map, (!))
 import qualified Data.Set as S
 import qualified Data.Map as M
-import Debug.Trace
 
 newtype Name = Name { unName :: String } deriving (Eq, Ord)
 instance Show Name where show (Name s) = s
@@ -60,6 +61,7 @@ data Term' u a
   | App (Term' u a) (Term' u a)
   | Lam Name (Term' u a) (Term' u a)
   | Type (Universe' u)
+  deriving (Eq, Ord)
 type Term = Term' Name Natural
 
 instance Show a => Show (Universe' a) where
@@ -68,22 +70,31 @@ instance Show a => Show (Universe' a) where
   show (UAdd a b) = show a ++ " + " ++ show b
   show (ULit n) = show n
 
-instance (Integral a, Show a, Show u) => Show (Term' u a) where
+instance (Integral a, Show a, Ord u, Show u) => Show (Term' u a) where
   show = showTerm
 
-showExpr :: (Integral a, Show u, Show a) => Bool -> [Name] -> Term' u a -> String
-showExpr isType l = \case
-  Var a     -> if a >= len l then "?" ++ show a else show $ genericIndex l a
-  App f e   -> goLamPar f ++ " (" ++ go e ++ ")"
+nameless :: Term' u a -> Term' u a
+nameless (Var a) = Var a
+nameless (App f e) = App (nameless f) (nameless e)
+nameless (Lam _ t e) = Lam (Name "_") (nameless t) (nameless e)
+nameless (Type u) = Type u
+
+showExpr
+  :: (Integral a, Ord u, Show u, Show a)
+  => Bool -> [Name] -> Map (Term' u a) Name -> Term' u a -> String
+showExpr isType l m = \case
+  e | nameless e `M.member` m -> show $ m ! nameless e
+  Var a -> if a >= len l then "?" ++ show a else show $ genericIndex l a
+  App f e -> goLamPar f ++ " (" ++ go e ++ ")"
   Lam a t e ->
     let (p, q) = (isType, occursFree 0 e) in
     if | p && q     -> "λ " ++ show a ++ " : " ++ go t ++ ", " ++ goNest a e
        | p && not q -> goVarPar t ++ " -> " ++ goNest a e
-       | not p && q -> "λ " ++ show a ++ " : " ++ showExpr True l t ++ ". " ++ goNest a e
+       | not p && q -> "λ " ++ show a ++ " : " ++ showExpr True l m t ++ ". " ++ goNest a e
        | otherwise  -> goVarPar t ++ " => " ++ goNest a e
   Type u -> "Type " ++ show u
   where
-    go = showExpr isType l
+    go = showExpr isType l m
 
     goLamPar f@(Lam _ _ _) = "(" ++ go f ++ ")"
     goLamPar f = go f
@@ -91,13 +102,25 @@ showExpr isType l = \case
     goVarPar v@(Var _) = go v
     goVarPar v = "(" ++ go v ++ ")"
 
-    goNest a e = showExpr isType (a : l) e
+    goNest a e = showExpr isType (a : l) m e
 
-showTerm :: (Integral b, Show a, Show b) => Term' a b -> String
-showTerm = showExpr False []
+invert
+  :: (Integral a, Ord u, Show u, Show a) => Map Name (Term' u a) -> Map (Term' u a) Name
+invert = M.fromList . map (\ (s, e) -> (nameless e, s)) . M.toList
 
-showType :: (Integral b, Show a, Show b) => Term' a b -> String
-showType = showExpr True []
+showTermPretty
+  :: (Integral b, Ord a, Show a, Show b) => Map Name (Term' a b) -> Term' a b -> String
+showTermPretty m = showExpr False [] (invert m)
+
+showTypePretty
+  :: (Integral b, Ord a, Show a, Show b) => Map Name (Term' a b) -> Term' a b -> String
+showTypePretty m = showExpr True [] (invert m)
+
+showTerm :: (Integral b, Ord a, Show a, Show b) => Term' a b -> String
+showTerm = showTermPretty M.empty
+
+showType :: (Integral b, Ord a, Show a, Show b) => Term' a b -> String
+showType = showTypePretty M.empty
 
 traverseTerm :: Applicative f => ([Name] -> a -> f b) -> Term' u a -> f (Term' u b)
 traverseTerm f = go [] where
@@ -174,9 +197,9 @@ universe (Var a) = universe =<< (!? a) =<< map snd . fst <$> get
 universe (App a b) = UMax <$> universe a <*> universe b
 universe (Lam a t e) = do
   ut <- universe t
-  modify (first ((a, t) :))
+  modify $ first ((a, t) :)
   ue <- universe e
-  modify (first tail)
+  modify $ first tail
   return $ UMax (UAdd (ULit 1) ut) ue
 universe (Type u) = return u
 
@@ -186,7 +209,7 @@ subtype (App f e) (App f' e') = (&&) <$> subtype f f' <*> subtype e e'
 subtype (Lam _ t e) (Lam _ t' e') = (&&) <$> subtype t t' <*> subtype e e'
 subtype t (Type u') = do
   u <- universe t
-  modify (second ((u, u') :))
+  modify $ second ((u, u') :)
   constraints <- snd <$> get
   result <- liftIO . sat $ toSym constraints
   case result of
@@ -202,8 +225,8 @@ checkSubtype s t = subtype s t >>= \case
   False -> do
     env <- fst <$> get
     throwError $
-      "Can't match '" ++ showExpr True (fst <$> env) s ++
-      "' with '" ++ showExpr True (fst <$> env) t ++ "'"
+      "Can't match '" ++ showExpr True (fst <$> env) M.empty s ++
+      "' with '" ++ showExpr True (fst <$> env) M.empty t ++ "'"
 
 infer' :: Term -> CheckM Term
 infer' (Var a) = (!? a) =<< map snd . fst <$> get

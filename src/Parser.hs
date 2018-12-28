@@ -84,7 +84,7 @@ var :: Map Name Term -> [Name] -> Parser Term
 var m env = do
   a <- name
   case m !? a of
-    Just e -> return e
+    Just e -> return $ e
     Nothing ->
       case elemIndex a env of
         Just n -> return $ Var (fromIntegral n)
