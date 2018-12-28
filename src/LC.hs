@@ -24,8 +24,9 @@ module LC
   , step
   , execute
   , evaluate
+  , universe
   , infer
-  , toSym
+  , run
   ) where
 
 import Numeric.Natural (Natural)
@@ -41,6 +42,7 @@ import Data.SBV hiding (showType)
 import Data.Map ((!))
 import qualified Data.Set as S
 import qualified Data.Map as M
+import Debug.Trace
 
 newtype Name = Name { unName :: String } deriving (Eq, Ord)
 instance Show Name where show (Name s) = s
@@ -77,7 +79,8 @@ showExpr isType l = \case
     let (p, q) = (isType, occursFree 0 e) in
     if | p && q     -> "λ " ++ show a ++ " : " ++ go t ++ ", " ++ goNest a e
        | p && not q -> goVarPar t ++ " -> " ++ goNest a e
-       | otherwise  -> "λ " ++ show a ++ " : " ++ showExpr True l t ++ ". " ++ goNest a e
+       | not p && q -> "λ " ++ show a ++ " : " ++ showExpr True l t ++ ". " ++ goNest a e
+       | otherwise  -> goVarPar t ++ " => " ++ goNest a e
   Type u -> "Type " ++ show u
   where
     go = showExpr isType l
@@ -154,6 +157,11 @@ type Constraint = (Universe, Universe)
 type Env = [(Name, Term)]
 type CheckM = ExceptT String (StateT (Env, [Constraint]) IO)
 
+(!?) :: (Show a, Integral a) => [Term' u a] -> a -> CheckM (Term' u a)
+l !? k
+  | k < len l = return $ genericIndex l k ↑ (k + 1)
+  | otherwise = throwError $ "Variable not in scope: " ++ show k
+
 indent :: String -> String
 indent = intercalate "\n" . map ("  " ++) . lines
 
@@ -161,11 +169,23 @@ showConstraints :: [Constraint] -> String
 showConstraints = intercalate "\n" . map (leq . bimap show show) where
   leq (l, r) = l ++ " ≤ " ++ r
 
+universe :: Term -> CheckM Universe
+universe (Var a) = universe =<< (!? a) =<< map snd . fst <$> get
+universe (App a b) = UMax <$> universe a <*> universe b
+universe (Lam a t e) = do
+  ut <- universe t
+  modify (first ((a, t) :))
+  ue <- universe e
+  modify (first tail)
+  return $ UMax (UAdd (ULit 1) ut) ue
+universe (Type u) = return u
+
 subtype :: Term -> Term -> CheckM Bool
 subtype (Var a) (Var a') = return $ a == a'
 subtype (App f e) (App f' e') = (&&) <$> subtype f f' <*> subtype e e'
 subtype (Lam _ t e) (Lam _ t' e') = (&&) <$> subtype t t' <*> subtype e e'
-subtype (Type u) (Type u') = do
+subtype t (Type u') = do
+  u <- universe (trace (show t) t)
   modify (second ((u, u') :))
   constraints <- snd <$> get
   result <- liftIO . sat $ toSym constraints
@@ -185,11 +205,6 @@ checkSubtype s t = subtype s t >>= \case
       "Can't match '" ++ showExpr True (fst <$> env) s ++
       "' with '" ++ showExpr True (fst <$> env) t ++ "'"
 
-(!?) :: (Show a, Integral a) => [Term' u a] -> a -> CheckM (Term' u a)
-l !? k
-  | k < len l = return $ genericIndex l k ↑ (k + 1)
-  | otherwise = throwError $ "Variable not in scope: " ++ show k
-
 infer' :: Term -> CheckM Term
 infer' (Var a) = (!? a) =<< map snd . fst <$> get
 infer' (App f e) = do
@@ -203,6 +218,13 @@ infer' (Type u) = return $ Type (UAdd u (ULit 1))
 
 infer :: Term -> IO (Either String Term)
 infer = flip evalStateT ([], []) . runExceptT . infer'
+
+run :: Term -> IO (Either String (Term, Term))
+run e = do
+  a <- infer e
+  case a of
+    Left s -> return $ Left s
+    Right t -> return $ Right (evaluate e, t)
 
 toSym :: [Constraint] -> Symbolic SBool
 toSym constraints = do

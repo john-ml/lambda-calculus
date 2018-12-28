@@ -1,5 +1,5 @@
 import LC
-import Parser
+import Parser (parse)
 
 import System.IO (hFlush, stdout)
 import Control.Monad (forever)
@@ -33,6 +33,8 @@ test = do
   testInfer $ "λ f : (λ A : Type n, A -> A), λ B : Type 0, λ x : B, f B x"
   testInfer $ "λ f : (λ A : Type n, A -> A), λ B : Type n + 1, λ x : B, f B x"
   testInfer $ "λ f : (λ A : Type 1, A -> A), λ B : Type 0, λ x : B, f (Type 0) B"
+
+  testInfer $ "λ f : (λ A : Type 0, A), λ g : (λ A : Type 0, A), f g"
 
 tryEither :: Either String b -> (b -> IO ()) -> IO ()
 tryEither e f = flip (either putStrLn) e f
