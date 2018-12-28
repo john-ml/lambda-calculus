@@ -1,18 +1,27 @@
-bool := λ A : Type n0, A -> A -> A
-nat := λ A : Type n1, (A -> A) -> A -> A
+bool := λ A : Type n_bool, A -> A -> A
+nat := λ A : Type n_nat, (A -> A) -> A -> A
 
-id := λ A : Type n2, λ a : A. a
+id := λ A : Type n, λ a : A. a
 compose :=
-  λ A : Type n3, λ B : Type n4, λ C : Type n5,
+  λ A : Type n0, λ B : Type n1, λ C : Type n2,
 	λ f : B -> C. λ g : A -> B. λ x : A.
 	f (g x)
+const := λ A : Type n3, λ B : Type n4, λ a : A. B => a
 
-true := λ A : Type n6, λ a : A. A => a
-false := λ A : Type n6, A => λ b : A. b
+True := λ A : Type n14, λ a : A. A
+False := λ A : Type n13, A
 
-zero := λ A : Type n1, (A -> A) => λ a : A. a
-succ := λ n : nat. λ A : Type n1, λ f : A -> A. λ a : A. f (n A f a)
-plus := λ n : nat. λ m : nat. λ A : Type n1, λ f : A -> A. λ a : A. n A f (m A f a)
-mult :=
-  λ n : nat. λ m : nat. λ A : Type n1, λ f : A -> A. λ a : A.
-	n (A -> A) (m A) f a
+and := λ A : Type n5, λ B : Type n6, λ C : Type n7, (A -> B -> C) -> C
+or := λ A : Type n8, λ B : Type n9, λ C : Type n10, (A -> C) -> (B -> C) -> C
+not := λ A : Type n11, λ C : Type n12, A -> C
+
+true := λ A : Type n_bool, λ a : A. A => a
+false := λ A : Type n_bool, A => λ b : A. b
+andb := λ p : bool. λ q : bool. λ A : Type n_bool, λ a : A. λ b : A. p A (q A a b) b
+orb := λ p : bool. λ q : bool. λ A : Type n_bool, λ a : A. λ b : A. p A a (q A a b)
+notb := λ p : bool. λ A : Type n_bool, λ a : A. λ b : A. p A b a
+
+zero := λ A : Type n_nat, (A -> A) => λ a : A. a
+succ := λ n : nat. λ A : Type n_nat, λ f : A -> A. λ a : A. f (n A f a)
+plus := λ n : nat. λ m : nat. λ A : Type n_nat, λ f : A -> A. λ a : A. n A f (m A f a)
+mult := λ n : nat. λ m : nat. λ A : Type n_nat, λ f : A -> A. λ a : A. n (A -> A) (m A) f a
