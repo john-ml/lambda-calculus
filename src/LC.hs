@@ -239,7 +239,7 @@ subtype t (Type u') = do
   u <- universe t
   modify . second $ simplify . (S.insert (u, u'))
   constraints <- snd <$> get
-  result <- liftIO . sat $ toSym (trace (showConstraints constraints ++ "\n") constraints)
+  result <- liftIO . sat $ toSym constraints
   case result of
     SatResult (Satisfiable _ _) -> return True
     _ -> throwError $
