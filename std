@@ -1,10 +1,18 @@
 bool := λ A : Type n0, A -> A -> A
 nat := λ A : Type n1, (A -> A) -> A -> A
 
-I := λ A : Type n2, λ a : A. a
-true := λ A : Type n3, λ a : A. A => a
-false := λ A : Type n3, A => λ b : A. b
+id := λ A : Type n2, λ a : A. a
+compose :=
+  λ A : Type n3, λ B : Type n4, λ C : Type n5,
+	λ f : B -> C. λ g : A -> B. λ x : A.
+	f (g x)
+
+true := λ A : Type n6, λ a : A. A => a
+false := λ A : Type n6, A => λ b : A. b
 
 zero := λ A : Type n1, (A -> A) => λ a : A. a
 succ := λ n : nat. λ A : Type n1, λ f : A -> A. λ a : A. f (n A f a)
 plus := λ n : nat. λ m : nat. λ A : Type n1, λ f : A -> A. λ a : A. n A f (m A f a)
+mult :=
+  λ n : nat. λ m : nat. λ A : Type n1, λ f : A -> A. λ a : A.
+	n (A -> A) (m A) f a

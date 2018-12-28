@@ -200,7 +200,8 @@ universe (Lam a t e) = do
   modify $ first ((a, t) :)
   ue <- universe e
   modify $ first tail
-  return $ UMax (UAdd (ULit 1) ut) ue
+  let ut' = if occursFree 0 e then UAdd (ULit 1) ut else ut
+  return $ UMax ut' ue
 universe (Type u) = return u
 
 subtype :: Term -> Term -> CheckM Bool
