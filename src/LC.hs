@@ -42,6 +42,7 @@ import Data.SBV hiding (showType)
 import Data.Map ((!))
 import qualified Data.Set as S
 import qualified Data.Map as M
+import Debug.Trace
 
 newtype Name = Name { unName :: String } deriving (Eq, Ord)
 instance Show Name where show (Name s) = s
@@ -136,8 +137,8 @@ substitute e' e = bindTerm e $ \ l a ->
 
 step' :: Integral a => Term' u a -> State Bool (Term' u a)
 step' (Var a)              = return $ Var a
-step' (App (Lam _ _ e) e') = return $ substitute e' e
-step' (App f e)            = flip App e <$> step' f <* put True
+step' (App (Lam _ _ e) e') = substitute e' e <$ put True
+step' (App f e)            = flip App e <$> step' f
 step' (Lam a t e)          = Lam a <$> step' t <*> step' e
 step' (Type u)             = return $ Type u
 
@@ -223,7 +224,9 @@ run e = do
   a <- infer e
   case a of
     Left s -> return $ Left s
-    Right t -> return $ Right (evaluate e, t)
+    Right t -> do
+      _ <- traverse (putStrLn . show) (execute e)
+      return $ Right (evaluate e, t)
 
 toSym :: [Constraint] -> Symbolic SBool
 toSym constraints = do
