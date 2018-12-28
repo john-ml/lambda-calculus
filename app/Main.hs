@@ -98,7 +98,12 @@ runLine s = do
      tryEither et $ \ (e', t) -> putStrLn $
        "(" ++ showTermPretty bindings e' ++ ") : (" ++ showTypePretty bindings t ++ ")"
     Right (Binding s' e) -> do
-      modify . first $ M.insert s' e
+      et <- liftIO $ infer e
+      case et of
+        Left err -> liftIO $ putStrLn err
+        Right t -> do
+          modify . first $ M.insert s' e
+          liftIO . putStrLn $ "Defined " ++ show s' ++ " : " ++ showTypePretty bindings t
     Right (Use files) -> do
       forM_ files $ (mapM_ runLine . blocks =<<) . lift . readFile
       modify $ second (++ files)

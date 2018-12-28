@@ -37,4 +37,4 @@ inl :=
   λ left : A -> C. (B -> C) => left a
 inr :=
   λ A : Type n22, λ B : Type n23, λ b : B. λ C : Type n24,
-  (A -> C) => λ right : B -> C. right b
+  (A -> C) => λ right : B -> C. right 
