@@ -138,7 +138,7 @@ substitute e' e = bindTerm e $ \ l a ->
 step' :: Integral a => Term' u a -> State Bool (Term' u a)
 step' (Var a)              = return $ Var a
 step' (App (Lam _ _ e) e') = substitute e' e <$ put True
-step' (App f e)            = flip App e <$> step' f
+step' (App f e)            = App <$> step' f <*> step' e
 step' (Lam a t e)          = Lam a <$> step' t <*> step' e
 step' (Type u)             = return $ Type u
 
@@ -224,9 +224,7 @@ run e = do
   a <- infer e
   case a of
     Left s -> return $ Left s
-    Right t -> do
-      _ <- traverse (putStrLn . show) (execute e)
-      return $ Right (evaluate e, t)
+    Right t -> return $ Right (evaluate e, t)
 
 toSym :: [Constraint] -> Symbolic SBool
 toSym constraints = do
