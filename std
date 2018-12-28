@@ -1,8 +1,8 @@
 id := λ A : Type n, λ a : A. a
 compose :=
   λ A : Type n0, λ B : Type n1, λ C : Type n2,
-	λ f : B -> C. λ g : A -> B. λ x : A.
-	f (g x)
+  λ f : B -> C. λ g : A -> B. λ x : A.
+  f (g x)
 const := λ A : Type n3, λ B : Type n4, λ a : A. B => a
 
 True := λ A : Type n14, λ a : A. A
@@ -38,3 +38,5 @@ inl :=
 inr :=
   λ A : Type n22, λ B : Type n23, λ b : B. λ C : Type n24,
   (A -> C) => λ right : B -> C. right 
+
+shift := λ p : and nat nat. pair nat nat (snd nat nat p) (succ (snd nat nat p))

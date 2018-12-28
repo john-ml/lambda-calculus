@@ -42,8 +42,10 @@ import Data.Functor (($>))
 import Data.Function (on)
 import Data.SBV hiding (showType)
 import Data.Map (Map, (!))
+import Data.Set (Set)
 import qualified Data.Set as S
 import qualified Data.Map as M
+import Debug.Trace
 
 newtype Name = Name { unName :: String } deriving (Eq, Ord)
 instance Show Name where show (Name s) = s
@@ -178,7 +180,7 @@ evaluate = last . execute
 
 type Constraint = (Universe, Universe)
 type Env = [(Name, Term)]
-type CheckM = ExceptT String (StateT (Env, [Constraint]) IO)
+type CheckM = ExceptT String (StateT (Env, Set Constraint) IO)
 
 (!?) :: (Show a, Integral a) => [Term' u a] -> a -> CheckM (Term' u a)
 l !? k
@@ -188,21 +190,46 @@ l !? k
 indent :: String -> String
 indent = intercalate "\n" . map ("  " ++) . lines
 
-showConstraints :: [Constraint] -> String
-showConstraints = intercalate "\n" . map (leq . bimap show show) where
+showConstraints :: Set Constraint -> String
+showConstraints = intercalate "\n" . map (leq . bimap show show) . S.toList where
   leq (l, r) = l ++ " ≤ " ++ r
 
 universe :: Term -> CheckM Universe
-universe (Var a) = universe =<< (!? a) =<< map snd . fst <$> get
-universe (App a b) = UMax <$> universe a <*> universe b
-universe (Lam a t e) = do
-  ut <- universe t
-  modify $ first ((a, t) :)
-  ue <- universe e
-  modify $ first tail
-  let ut' = if occursFree 0 e then UAdd (ULit 1) ut else ut
-  return $ UMax ut' ue
-universe (Type u) = return u
+universe = \case
+  Var a -> universe =<< (!? a) =<< map snd . fst <$> get
+  App a b -> umax <$> universe a <*> universe b
+  Lam a t e -> do
+    ut <- universe t
+    modify $ first ((a, t) :)
+    ue <- universe e
+    modify $ first tail
+    if occursFree 0 e then
+      return $ if ut == ue then inc ut else umax (inc ut) ue
+    else
+      return $ umax ut ue
+  Type u -> return u
+  where
+    inc = UAdd (ULit 1)
+    umax a b
+      | a == b = a
+      | otherwise = UMax a b
+
+simplify :: Set Constraint -> Set Constraint
+simplify = S.filter (not . uncurry (==))
+
+toSym :: Set Constraint -> Symbolic SBool
+toSym constraints = do
+  vars' <- sequence vars
+  let nats = (literal 0 .<=) . snd <$> M.toList vars'
+  let clauses = uncurry ((.<=) `on` sym vars') <$> S.toList constraints
+  return $ bAnd (nats ++ clauses)
+  where
+    names = S.toList . foldMap (foldMap S.singleton . uncurry UAdd) $ constraints
+    vars = M.fromList $ zip names (exists . unName <$> names)
+    sym _     (ULit n) = literal (fromIntegral n :: Integer)
+    sym vars' (UVar s) = vars' ! s
+    sym vars' (UMax a b) = smax (sym vars' a) (sym vars' b)
+    sym vars' (UAdd a b) = sym vars' a + sym vars' b
 
 subtype :: Term -> Term -> CheckM Bool
 subtype (Var a) (Var a') = return $ a == a'
@@ -210,9 +237,9 @@ subtype (App f e) (App f' e') = (&&) <$> subtype f f' <*> subtype e e'
 subtype (Lam _ t e) (Lam _ t' e') = (&&) <$> subtype t t' <*> subtype e e'
 subtype t (Type u') = do
   u <- universe t
-  modify $ second ((u, u') :)
+  modify . second $ simplify . (S.insert (u, u'))
   constraints <- snd <$> get
-  result <- liftIO . sat $ toSym constraints
+  result <- liftIO . sat $ toSym (trace (showConstraints constraints ++ "\n") constraints)
   case result of
     SatResult (Satisfiable _ _) -> return True
     _ -> throwError $
@@ -234,14 +261,14 @@ infer' (Var a) = (!? a) =<< map snd . fst <$> get
 infer' (App f e) = do
   tf <- infer' f
   case evaluate tf of
-    Lam _ t e' -> (infer' e >>= (`checkSubtype` t)) $> substitute e e'
+    Lam _ t e' -> (evaluate <$> infer' e >>= (`checkSubtype` t)) $> substitute e e'
     tf' -> throwError $ "Non-functional construction: " ++ show f ++ " : " ++ show tf'
 infer' (Lam a t e) =
   Lam a t <$> (infer' t *> modify (first ((a, t) :)) *> infer' e <* modify (first tail))
 infer' (Type u) = return $ Type (UAdd u (ULit 1))
 
 infer :: Term -> IO (Either String Term)
-infer = flip evalStateT ([], []) . runExceptT . infer'
+infer = flip evalStateT ([], S.empty) . runExceptT . infer'
 
 run :: Term -> IO (Either String (Term, Term))
 run e = do
@@ -249,17 +276,3 @@ run e = do
   case a of
     Left s -> return $ Left s
     Right t -> return $ Right (evaluate e, t)
-
-toSym :: [Constraint] -> Symbolic SBool
-toSym constraints = do
-  vars' <- sequence vars
-  let nats = (literal 0 .<=) . snd <$> M.toList vars'
-  let clauses = uncurry ((.<=) `on` sym vars') <$> constraints
-  return $ bAnd (nats ++ clauses)
-  where
-    names = S.toList . foldMap (foldMap S.singleton . uncurry UAdd) $ constraints
-    vars = M.fromList $ zip names (exists . unName <$> names)
-    sym _     (ULit n) = literal (fromIntegral n :: Integer)
-    sym vars' (UVar s) = vars' ! s
-    sym vars' (UMax a b) = smax (sym vars' a) (sym vars' b)
-    sym vars' (UAdd a b) = sym vars' a + sym vars' b
