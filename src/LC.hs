@@ -42,7 +42,6 @@ import Data.SBV hiding (showType)
 import Data.Map ((!))
 import qualified Data.Set as S
 import qualified Data.Map as M
-import Debug.Trace
 
 newtype Name = Name { unName :: String } deriving (Eq, Ord)
 instance Show Name where show (Name s) = s
@@ -185,7 +184,7 @@ subtype (Var a) (Var a') = return $ a == a'
 subtype (App f e) (App f' e') = (&&) <$> subtype f f' <*> subtype e e'
 subtype (Lam _ t e) (Lam _ t' e') = (&&) <$> subtype t t' <*> subtype e e'
 subtype t (Type u') = do
-  u <- universe (trace (show t) t)
+  u <- universe t
   modify (second ((u, u') :))
   constraints <- snd <$> get
   result <- liftIO . sat $ toSym constraints

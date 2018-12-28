@@ -1,17 +1,19 @@
+{-# LANGUAGE LambdaCase #-}
 import LC
-import Parser (parse)
+import Parser
 
 import System.IO (hFlush, stdout)
 import Control.Monad (forever)
-
-main :: IO ()
-main = test *> repl
-
-promptLine :: IO String
-promptLine = putStr "> " *> hFlush stdout *> getLine
-
-repl :: IO a
-repl = forever $ promptLine >>= testRun
+import Control.Monad.State
+import Text.Megaparsec hiding (parse)
+import Data.Void
+import Data.Char
+import Data.List
+import Data.Function
+import Data.Bifunctor
+import Data.Map (Map)
+import qualified Data.Map as M
+import Debug.Trace
 
 test :: IO ()
 test = do
@@ -64,3 +66,47 @@ testRun s = withParsed s $ \ e -> do
   tryEither et $ \ (e', t) ->
     putStrLn $ "(" ++ showTerm e' ++ ") : (" ++ showType t ++ ")"
   putStrLn ""
+
+type ReplM = StateT (Map Name Term, [String]) IO
+
+prompt :: String -> ReplM String
+prompt s = liftIO $ putStr s *> hFlush stdout *> getLine
+
+type Parser = Parsec Void String
+data Command = Query Term | Binding Name Term | Use [String]
+
+userInput :: Map Name Term -> Parser Command
+userInput m = try directive <|> try definition <|> Query <$> term m [] <* eof where
+  directive = symbol ":" *> word >>= \case
+    "use" -> Use <$> some word
+    s -> fail $ "Unknown command '" ++ s ++ "'"
+  definition = Binding <$> name <* symbol ":=" <*> term m [] <* eof
+
+blocks :: String -> [String]
+blocks = (concat <$>) . groupBy ((<) `on` indent) . lines where
+  indent = length . takeWhile isSpace
+
+runLine :: String -> ReplM ()
+runLine "" = return ()
+runLine ('#' : _) = return ()
+runLine s = do
+  (bindings, _) <- get
+  case runParser (userInput bindings) "" s of
+    Left e -> liftIO . putStrLn $ errorBundlePretty e
+    Right (Query e) -> liftIO $ do
+     et <- run e
+     tryEither et $ \ (e', t) ->
+       putStrLn $ "(" ++ showTerm e' ++ ") : (" ++ showType t ++ ")"
+    Right (Binding s' e) -> do
+      modify . first $ M.insert s' e
+    Right (Use files) -> do
+      forM_ files $ (mapM_ runLine . blocks =<<) . lift . readFile
+      modify $ second (++ files)
+
+repl :: ReplM ()
+repl = forever $ do
+  (_, loaded) <- get
+  runLine =<< (prompt $ unwords loaded ++ "> ")
+
+main :: IO ()
+main = test *> void (runStateT repl (M.empty, []))
