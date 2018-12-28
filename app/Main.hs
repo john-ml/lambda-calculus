@@ -7,9 +7,11 @@ import Control.Monad (forever)
 main :: IO ()
 main = test *> repl
 
+promptLine :: IO String
+promptLine = putStr "> " *> hFlush stdout *> getLine
+
 repl :: IO a
-repl = forever $ do
-  putStr "> " *> hFlush stdout *> getLine >>= testInfer
+repl = forever $ promptLine >>= testRun
 
 test :: IO ()
 test = do
@@ -52,4 +54,11 @@ testInfer :: String -> IO ()
 testInfer s = withParsed s $ \ e -> do
   t <- infer e
   tryEither t (putStrLn . showType)
+  putStrLn ""
+
+testRun :: String -> IO ()
+testRun s = withParsed s $ \ e -> do
+  et <- run e
+  tryEither et $ \ (e', t) ->
+    putStrLn $ "(" ++ showTerm e' ++ ") : (" ++ showType t ++ ")"
   putStrLn ""
