@@ -22,8 +22,8 @@ std> snd nat bool (swap bool nat (pair bool nat true (succ zero)))
 ```
 
 Notes:
-- No implicit arguments
+- No unification (=> no placeholders / implicit arguments)
 - Universe levels are specified manually (and universe variables have global scope)
 - No `∀`: `(λ A : Type 0, λ a : A. a) : (λ A : Type 0, A -> A) : (λ A : Type 0, A -> Type 0) : ...`
-  + In CiC, `(λ A : Type 0, λ a : A. A) : (∀ A : Type 0, A -> A) : Type 1 : ...`
-
+  + Simpler but makes some nonsense terms representable
+  + e.g. in CiC, `(λ A : Type 0, λ a : A. A) : (∀ A : Type 0, A -> A) : Type 1 : ...`
